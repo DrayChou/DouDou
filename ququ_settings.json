@@ -1,0 +1,8 @@
+{
+  "api_key": "1234",
+  "base_url": "http://localhost:11435/v1",
+  "model_name": "jan-v1-4b",
+  "language": "zh",
+  "use_vad": true,
+  "use_punc": true
+}

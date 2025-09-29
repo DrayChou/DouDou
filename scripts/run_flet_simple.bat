@@ -3,6 +3,9 @@ echo 蛐蛐 Flet 应用启动器 (标准 Python 虚拟环境)
 echo ================================================
 echo.
 
+REM 切换到项目根目录
+cd /d "%~dp0.."
+
 REM 检查 Python 是否可用
 python --version >nul 2>&1
 if errorlevel 1 (

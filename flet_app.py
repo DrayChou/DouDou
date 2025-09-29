@@ -20,12 +20,12 @@ import pyaudio
 import numpy as np
 from datetime import datetime
 
-# 音频录制参数
-CHUNK = 1024
+# 音频录制参数 - 匹配原版设置
+CHUNK = 1024  # 保持1024缓冲区大小
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 16000
-RECORD_SECONDS = 30
+RATE = 16000  # 16kHz采样率，匹配FunASR要求
+# RECORD_SECONDS = 30  # 移除录音时间限制，允许持续录音
 
 class QuQuFletApp:
     def __init__(self, page: ft.Page):
@@ -278,15 +278,21 @@ class QuQuFletApp:
             self.status_text.color = ft.Colors.RED_700
             self.recording_progress.value = 0
 
-            # 开始音频流
+            # 启动音频流 - 配置增强的录音参数
             self.audio_stream = self.audio.open(
                 format=FORMAT,
                 channels=CHANNELS,
                 rate=RATE,
                 input=True,
                 frames_per_buffer=CHUNK,
-                stream_callback=self.audio_callback
+                stream_callback=self.audio_callback,
+                input_device_index=None,  # 使用默认输入设备
+                # 启用音频增强功能
+                # start=False,  # 手动启动流
             )
+
+            # 启动音频流 - 这是关键步骤！
+            self.audio_stream.start_stream()
 
             # 启动进度更新线程
             self.start_progress_timer()
@@ -341,23 +347,25 @@ class QuQuFletApp:
         return (in_data, pyaudio.paContinue)
 
     def start_progress_timer(self):
-        """启动进度计时器 - 使用 Flet 0.28.3 推荐的线程方法"""
+        """启动进度计时器 - 显示录音时长，无时间限制"""
         def update_progress():
-            """在后台线程中更新录音进度"""
+            """在后台线程中更新录音进度 - 持续录音模式"""
             start_time = time.time()
             while self.is_recording:
                 elapsed = time.time() - start_time
-                progress = min(elapsed / RECORD_SECONDS, 1.0)
 
-                # 更新进度条 - Flet 0.28.3 中在 run_thread 内可以直接调用 update
-                self.recording_progress.value = progress
+                # 显示录音时长（无上限）
+                minutes = int(elapsed // 60)
+                seconds = int(elapsed % 60)
+
+                # 更新进度条显示录音时长
+                # 使用脉冲模式表示持续录音
+                progress_value = (elapsed % 2) / 2  # 2秒循环的脉冲效果
+                self.recording_progress.value = progress_value
+
+                # 更新状态文本显示录音时长
+                self.status_text.value = f"正在录音... {minutes:02d}:{seconds:02d}"
                 self.page.update()
-
-                # 如果达到最大录音时间，自动停止
-                if elapsed >= RECORD_SECONDS:
-                    # 直接调用停止录音 - Flet 会处理线程安全
-                    self.stop_recording()
-                    break
 
                 time.sleep(0.1)
 
