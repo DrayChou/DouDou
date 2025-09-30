@@ -126,10 +126,10 @@ class QuQuFletApp:
         )
 
         # 录音控制区域 - 用容器包装以便更新
-        record_button_container = ft.Container()
+        self.record_button_container = ft.Container()
         self.record_button = RecordButton(on_click=self.toggle_recording)
-        self.record_button.set_parent_container(record_button_container)
-        record_button_container.content = self.record_button.button
+        self.record_button.set_parent_container(self.record_button_container)
+        self.record_button_container.content = self.record_button.button
 
         self.status_display = StatusDisplay()
 
@@ -190,7 +190,7 @@ class QuQuFletApp:
                 self.header,
                 ft.Container(height=15),
                 # 录音控制区域 - 录音按钮
-                record_button_container,
+                self.record_button_container,
                 ft.Container(height=8),
                 # 实时模式切换 - 放在录音按钮下方
                 ft.Row([

@@ -1,0 +1,13 @@
+# 打包构建依赖
+pyinstaller>=6.3.0
+setuptools>=70.0.0
+wheel>=0.43.0
+packaging>=24.0
+
+# 平台特定依赖
+# Windows
+pywin32>=306; sys_platform == "win32"
+# macOS
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+# Linux
+python3-dev; sys_platform == "linux"

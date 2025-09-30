@@ -139,12 +139,60 @@ ququ_flet/
     4.  将您的分支推送到远程 (`git push origin feature/your-amazing-feature`)
     5.  创建一个 Pull Request
 
+## 📦 打包分发
+
+### Windows 平台打包 ✅
+
+DouDou 支持 Windows 平台打包，可以生成独立的可执行文件，无需安装Python环境即可运行。
+
+#### 快速打包
+
+```bash
+# 一键打包（推荐）
+build_windows.bat
+```
+
+#### 手动打包
+
+```bash
+# 安装打包依赖
+pip install -r build/pyinstaller/build_requirements.txt
+
+# 运行打包脚本
+python build/pyinstaller/build.py
+```
+
+#### 打包输出
+
+打包完成后，会在 `release/` 目录生成：
+- `DouDou.exe` - 独立可执行文件
+- `DouDou-Windows-x64-v1.0.0.zip` - 完整发布包
+- 配置文件和启动脚本
+
+#### 平台兼容性说明
+
+- ✅ **Windows**: 完整支持，已测试
+- ⚠️ **macOS**: 理论支持，但缺少macOS设备进行测试
+- ⚠️ **Linux**: 理论支持，但缺少Linux桌面环境进行测试
+
+> **注意**: 由于开发者只有Windows设备，目前只能确保Windows平台的打包质量。欢迎社区用户测试其他平台并提供反馈。
+
+### 跨平台构建计划
+
+未来计划通过GitHub Actions实现真正的跨平台自动构建：
+
+```yaml
+# .github/workflows/build.yml
+# 支持 Windows、macOS、Linux 三平台自动构建
+```
+
 ## 🙏 致谢
 
 本项目的诞生离不开以下优秀项目的启发和支持：
 
 - [FunASR](https://github.com/modelscope/FunASR): 阿里巴巴开源的工业级语音识别工具包。
 - [Flet](https://flet.dev/): 现代化的 Python UI 框架。
+- [PyInstaller](https://pyinstaller.org/): Python应用打包工具。
 
 ## 📄 许可证
 
