@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-蛐蛐 (QuQu) - Flet 原型应用
+DouDou - Flet 原型应用
 基于 Flet 的现代化语音转文字应用
 """
 
@@ -110,7 +110,7 @@ class QuQuFletApp:
         self.header = ft.Column(
             [
                 ft.Text(
-                    "🎤 蛐蛐 (QuQu)",
+                    "🎤 DouDou",
                     size=28,
                     weight=ft.FontWeight.BOLD,
                     color=ft.Colors.BLUE_700,

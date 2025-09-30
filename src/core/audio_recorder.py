@@ -207,7 +207,7 @@ class AudioRecorder:
             print(f"[AudioRecorder] 音频信息: {total_bytes} bytes, {duration:.2f}秒, 采样率: {self.engine.sample_rate}, 通道: {self.engine.channels}")
 
             # 保存原始音频
-            original_file = os.path.join(temp_dir, f"ququ_recording_original_{timestamp}.wav")
+            original_file = os.path.join(temp_dir, f"doudou_recording_original_{timestamp}.wav")
             print(f"[AudioRecorder] 保存原始音频到: {original_file}")
 
             sample_width = self.engine.get_sample_size()
@@ -231,7 +231,7 @@ class AudioRecorder:
                         self.engine.sample_rate
                     )
 
-                    enhanced_file = os.path.join(temp_dir, f"ququ_recording_enhanced_{timestamp}.wav")
+                    enhanced_file = os.path.join(temp_dir, f"doudou_recording_enhanced_{timestamp}.wav")
                     with wave.open(enhanced_file, 'wb') as wf:
                         wf.setnchannels(self.engine.channels)
                         wf.setsampwidth(sample_width)

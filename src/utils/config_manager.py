@@ -35,7 +35,7 @@ class ConfigManager:
         """
         if config_file is None:
             # 使用当前工作目录的配置文件
-            self.config_file = os.path.join(os.getcwd(), "ququ_settings.json")
+            self.config_file = os.path.join(os.getcwd(), "doudou_settings.json")
         else:
             self.config_file = config_file
 
