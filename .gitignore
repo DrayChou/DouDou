@@ -84,3 +84,4 @@ temp/
 # Claude Code documentation
 CLAUDE.md
 AGENTS.md
+/build_env

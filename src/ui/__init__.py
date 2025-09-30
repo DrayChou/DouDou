@@ -15,6 +15,7 @@ from .components import (
     RealtimeModeToggle,
 )
 from .dialogs import SettingsDialog, HelpDialog
+from .task_monitor import TaskMonitor
 
 __all__ = [
     "RecordButton",
@@ -26,4 +27,5 @@ __all__ = [
     "RealtimeModeToggle",
     "SettingsDialog",
     "HelpDialog",
+    "TaskMonitor",
 ]

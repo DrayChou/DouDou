@@ -6,6 +6,7 @@ DouDou - Flet 原型应用
 """
 
 import os
+import time
 import flet as ft
 from typing import Optional
 
@@ -18,6 +19,10 @@ from core import (
     HybridVADSegmenter,
     VADConfig,
     create_chinese_optimized_config,
+    TaskManager,
+    ContinuousAudioRecorder,
+    RecorderConfig,
+    AudioSegment,
 )
 from utils.config_manager import ConfigManager
 from ui.dialogs import SettingsDialog, HelpDialog
@@ -29,10 +34,11 @@ from ui.components import (
     AudioDeviceSelector,
     RealtimeModeToggle,
 )
+from ui.task_monitor import TaskMonitor
 
 
 class QuQuFletApp:
-    """蛐蛐Flet应用主类 - 协调器模式"""
+    """DouDou Flet应用主类 - 协调器模式"""
 
     def __init__(self, page: ft.Page):
         self.page = page
@@ -40,6 +46,30 @@ class QuQuFletApp:
         self._init_services()
         self._setup_ui()
         self._setup_callbacks()
+
+        # 设置页面关闭时的清理
+        page.on_close = self._on_page_close
+
+    def _on_page_close(self):
+        """页面关闭时的清理工作"""
+        try:
+            print("[INFO] 正在清理应用资源...")
+
+            # 停止连续录音
+            if hasattr(self, 'continuous_recorder') and self.continuous_recorder:
+                self.continuous_recorder.stop_continuous_recording()
+
+            # 停止任务管理器
+            if hasattr(self, 'task_manager') and self.task_manager:
+                self.task_manager.stop()
+
+            # 停止任务监控
+            if hasattr(self, 'task_monitor') and self.task_monitor:
+                self.task_monitor.stop_monitoring()
+
+            print("[INFO] 应用资源清理完成")
+        except Exception as e:
+            print(f"[ERROR] 清理资源时出错: {e}")
 
     def _setup_page(self):
         """设置页面基本属性"""
@@ -103,6 +133,35 @@ class QuQuFletApp:
         # VAD分段器 - 使用中文语音优化配置
         self.vad_config = create_chinese_optimized_config()
         self.vad_segmenter = HybridVADSegmenter(sample_rate=16000, config=self.vad_config)
+
+        # 多线程任务管理器
+        self.task_manager = TaskManager()
+        self.task_manager.start()
+
+        # 连续录音器 - 用于实时模式
+        recorder_config = RecorderConfig(
+            sample_rate=16000,
+            channels=1,
+            chunk_size=1024,
+            min_segment_duration=0.5,
+            max_segment_duration=8.0,
+            silence_timeout=1.5,
+        )
+        self.continuous_recorder = ContinuousAudioRecorder(
+            audio_engine=self.audio_engine,
+            vad_segmenter=self.vad_segmenter,
+            task_manager=self.task_manager,
+            config=recorder_config
+        )
+
+        # 设置任务管理器回调
+        self.task_manager.on_recognition_complete = self._on_recognition_complete
+        self.task_manager.on_ai_optimization_complete = self._on_ai_optimization_complete
+        self.task_manager.on_ui_update = self._on_ui_update
+
+        # 设置连续录音器回调
+        self.continuous_recorder.on_segment_detected = self._on_audio_segment_detected
+        self.continuous_recorder.on_error = self._on_recorder_error
 
     def _setup_ui(self):
         """设置UI界面"""
@@ -173,12 +232,18 @@ class QuQuFletApp:
             height=32,
         )
 
+        # 任务监控器
+        self.task_monitor = TaskMonitor(self.task_manager)
+
         # 主界面布局
         self.main_layout = self._build_main_layout()
         self.page.add(self.main_layout)
 
         # 初始化设备状态显示（必须在UI创建之后）
         self.update_device_status(None)
+
+        # 启动任务监控
+        self.task_monitor.start_monitoring()
 
     def _build_main_layout(self) -> ft.Control:
         """构建主界面布局"""
@@ -213,23 +278,32 @@ class QuQuFletApp:
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
         )
 
-        # 右侧结果面板
+        # 右侧面板（包含结果和任务监控）
         right_panel = ft.Container(
             expand=True,
             padding=ft.padding.all(15),
-            content=ft.Column([
-                # 设备信息区域
-                ft.Container(
-                    content=ft.Row([
-                        self.device_status_text,
-                    ], alignment=ft.MainAxisAlignment.START),
-                    padding=ft.padding.only(bottom=10),
-                ),
-                # 识别结果区域（占满剩余空间）
+            content=ft.Row([
+                # 识别结果区域
                 ft.Container(
                     expand=True,
-                    content=self.result_card.card
+                    content=ft.Column([
+                        # 设备信息区域
+                        ft.Container(
+                            content=ft.Row([
+                                self.device_status_text,
+                            ], alignment=ft.MainAxisAlignment.START),
+                            padding=ft.padding.only(bottom=10),
+                        ),
+                        # 识别结果区域（占满剩余空间）
+                        ft.Container(
+                            expand=True,
+                            content=self.result_card.card
+                        ),
+                    ]),
                 ),
+                # 任务监控面板
+                ft.Container(width=10),  # 间距
+                self.task_monitor.get_control(),
             ]),
         )
 
@@ -353,12 +427,81 @@ class QuQuFletApp:
     # 实时模式
     def toggle_realtime_mode(self, is_realtime: bool):
         """切换实时模式"""
-        self.update_status(f"实时模式: {'开启' if is_realtime else '关闭'}")
+        if is_realtime:
+            # 启动连续录音
+            try:
+                success = self.continuous_recorder.start_continuous_recording()
+                if success:
+                    self.update_status("实时模式已开启")
+                    self.record_button.set_recording_state(True)
+                else:
+                    self.update_status("启动实时模式失败")
+                    self.realtime_toggle.set_realtime(False)
+            except Exception as e:
+                print(f"[ERROR] 启动连续录音失败: {e}")
+                self.update_status(f"启动实时模式失败: {e}")
+                self.realtime_toggle.set_realtime(False)
+        else:
+            # 停止连续录音
+            try:
+                self.continuous_recorder.stop_continuous_recording()
+                self.update_status("实时模式已关闭")
+                self.record_button.set_recording_state(False)
+            except Exception as e:
+                print(f"[ERROR] 停止连续录音失败: {e}")
+                self.update_status(f"停止实时模式失败: {e}")
 
     def on_vad_segment_detected(self, segment):
-        """VAD段落检测回调"""
+        """VAD段落检测回调（旧的，保留兼容性）"""
         if self.realtime_toggle.is_realtime:
             self.update_status("检测到语音，正在处理...")
+
+    # TaskManager 回调方法
+    def _on_audio_segment_detected(self, audio_segment: AudioSegment):
+        """音频片段检测回调"""
+        print(f"[DEBUG] 检测到音频片段: {audio_segment.segment_id}, 时长: {audio_segment.duration:.2f}s")
+
+    def _on_recognition_complete(self, task):
+        """语音识别完成回调"""
+        if task.result and task.result.get('success'):
+            text = task.result.get('text', '')
+            confidence = task.result.get('confidence', 0)
+            print(f"[DEBUG] 识别完成: {text} (置信度: {confidence:.3f})")
+
+            # 添加到结果卡片
+            self.result_card.add_result(text, ft.Colors.BLUE)
+            self.update_status(f"识别完成: {text[:20]}...")
+
+            # 提交UI更新
+            self.task_manager._submit_ui_update({
+                'type': 'recognition_complete',
+                'result': task.result,
+                'timestamp': time.time()
+            })
+
+    def _on_ai_optimization_complete(self, task):
+        """AI优化完成回调"""
+        if task.optimized_text:
+            print(f"[DEBUG] AI优化完成: {task.optimized_text}")
+
+            # 更新结果卡片中的最后一条记录
+            # 这里可以实现更复杂的优化结果展示逻辑
+            self.update_status(f"AI优化完成")
+
+    def _on_ui_update(self, update_data: dict):
+        """UI更新回调"""
+        # 这个回调会传递给TaskMonitor处理
+        pass
+
+    def _on_recorder_error(self, error: Exception):
+        """录音器错误回调"""
+        print(f"[ERROR] 录音器错误: {error}")
+        self.update_status(f"录音错误: {error}")
+
+        # 停止实时模式
+        if self.realtime_toggle.is_realtime:
+            self.realtime_toggle.set_realtime(False)
+            self.toggle_realtime_mode(False)
 
     # 结果操作
     def copy_result(self, e=None):

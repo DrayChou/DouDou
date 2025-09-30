@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 echo 🚀 DouDou Windows 打包工具
 echo ========================================
 
@@ -20,11 +20,13 @@ call build_env\Scripts\activate.bat
 echo 📥 安装依赖...
 pip install --upgrade pip
 pip install -r requirements.txt
-pip install -r build\pyinstaller\build_requirements.txt
+pip install pyinstaller
 
 :: 运行打包脚本
 echo 🏗️ 开始打包...
-python build\pyinstaller\build.py
+echo ⚠️  Build infrastructure needs to be recreated
+echo Please run: pyinstaller --onefile main.py
+echo Or recreate the build/ directory with proper PyInstaller specs
 
 :: 清理
 echo 🧹 清理虚拟环境...
