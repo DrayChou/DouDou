@@ -2,8 +2,11 @@
 flet>=0.28.3
 
 # 音频处理
-pyaudio>=0.2.14
+PyAudioWPatch>=0.2.12.7  # Windows WASAPI 支持的 PyAudio 分支（优先）
+pyaudio>=0.2.14          # 标准 PyAudio 后备
 numpy>=1.21.0
+scipy>=1.9.0
+sounddevice>=0.5.0       # 备用音频库，解决Windows兼容性问题
 
 # FunASR 语音识别依赖
 funasr>=1.2.7

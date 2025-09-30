@@ -4,5 +4,6 @@
   "model_name": "jan-v1-4b",
   "language": "zh",
   "use_vad": true,
-  "use_punc": true
+  "use_punc": true,
+  "enable_ai_optimization": true
 }
