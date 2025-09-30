@@ -13,33 +13,42 @@ import threading
 import time
 import wave
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
-import flet as ft
-import numpy as np
+from typing import Optional, Dict, Any, List
+
 from datetime import datetime
 
-# 音频相关模块 - 优先使用 PyAudioWPatch 支持 Windows WASAPI
-try:
-    import pyaudiowpatch as pyaudio  # Windows WASAPI 支持版本
-    AUDIO_BACKEND = "PyAudioWPatch"
-    print(f"[DEBUG] 使用 {AUDIO_BACKEND} (WASAPI支持)")
-except ImportError:
-    try:
-        import pyaudio  # 标准版本后备
-        AUDIO_BACKEND = "PyAudio"
-        print(f"[DEBUG] 使用标准 {AUDIO_BACKEND}")
-    except ImportError:
-        print("[ERROR] 无法导入 PyAudio 或 PyAudioWPatch")
-        pyaudio = None
-        AUDIO_BACKEND = "None"
+import flet as ft
+import numpy as np
 
-# 音频录制参数 - 匹配原版设置
-CHUNK = 1024  # 保持1024缓冲区大小
-FORMAT = pyaudio.paInt16
+from core.audio_engine import (
+    AUDIO_BACKEND_NAME,
+    AudioDeviceInfo,
+    AudioEngine,
+    AudioStreamConfig,
+    AudioTestResult,
+)
+from core.vad_system import HybridVADSegmenter, VADConfig, VADSegment
+from core.ai_integration import AIProcessor
+from core.recognition_pipeline import RecognitionPipeline
+from utils.config_manager import ConfigManager
+from utils.audio_utils import enhance_audio_quality, calculate_rms_level
+
+
+# 音频录制默认参数
+CHUNK = 1024
 CHANNELS = 1
-RATE = 16000  # 16kHz采样率，匹配FunASR要求
-# RECORD_SECONDS = 30  # 移除录音时间限制，允许持续录音
+RATE = 16000
+
+
+@dataclass
+class PendingSegment:
+    """待处理的实时识别段"""
+
+    audio_path: str
+    info: Dict[str, Any]
+
 
 class QuQuFletApp:
     def __init__(self, page: ft.Page):
@@ -73,26 +82,38 @@ class QuQuFletApp:
         # 状态变量
         self.is_recording = False
         self.audio_stream = None
-        self.audio_frames = []
-        self.current_audio_file = None
+        self.audio_frames: List[bytes] = []
+        self.current_audio_file: Optional[str] = None
         self.transcription_result = ""
         self.funasr_process = None
-        self.selected_audio_device = None  # 当前选择的音频设备
-        self.is_testing_audio = False      # 音频测试状态
-        self.working_audio_config = None   # 已验证的工作音频配置
-        self.audio_backend_type = "standard"  # 音频后端类型
-        self.audio_disabled_mode = False   # 音频禁用模式
+        self.selected_audio_device: Optional[int] = None
+        self.is_testing_audio = False
+        self.working_audio_config: Optional[Dict[str, Any]] = None
+        self.audio_disabled_mode = False
 
-        # 配置变量
-        self.settings = {
-            "api_key": "",
-            "base_url": "",
-            "model_name": "",
-            "language": "zh",
-            "use_vad": True,
-            "use_punc": True,
-            "enable_ai_optimization": True,  # 新增AI优化开关
-        }
+        # 核心服务组件
+        self.audio_engine: Optional[AudioEngine] = None
+        self.audio_format: Optional[int] = None
+        try:
+            self.audio_engine = AudioEngine(sample_rate=RATE, chunk_size=CHUNK, channels=CHANNELS)
+            self.audio_backend_type = self.audio_engine.backend_name
+        except RuntimeError as exc:
+            self.audio_backend_type = AUDIO_BACKEND_NAME
+            print(f"[ERROR] 初始化音频引擎失败: {exc}")
+
+        self.config_manager = ConfigManager()
+        self.settings = self.config_manager.get_all()
+        self.recognition_pipeline = RecognitionPipeline()
+        self.ai_processor: Optional[AIProcessor] = None
+
+        # 实时语音识别相关状态
+        self.is_realtime_mode = False
+        self.realtime_thread = None
+        self.vad_config = VADConfig()
+        self.vad_segmenter = HybridVADSegmenter(sample_rate=RATE, config=self.vad_config)
+        self.pending_recognition = False
+        self.recognition_queue: List[PendingSegment] = []
+        self.current_segment_text = ""
 
         # 创建UI组件
         self.setup_ui()
@@ -377,18 +398,16 @@ class QuQuFletApp:
     def init_audio_system(self):
         """初始化音频系统 - 增加详细诊断和自动测试"""
         try:
-            self.audio = pyaudio.PyAudio()
+            if not self.audio_engine:
+                raise RuntimeError("音频引擎不可用，请检查PyAudio依赖")
 
-            # 详细音频设备诊断
-            print(f"[DEBUG] 音频系统初始化成功")
-            print(f"[DEBUG] PyAudio版本: {pyaudio.__version__}")
+            self.audio_engine.initialise()
+            self.audio_format = self.audio_engine.audio_format
 
-            # 列出所有音频设备并填充下拉菜单
+            print(f"[DEBUG] 音频系统初始化成功，后端: {self.audio_engine.backend_name}")
+
             self.populate_audio_devices()
-
-            # 自动测试默认设备
             self.auto_test_default_device()
-
             self.update_status("音频系统初始化成功")
         except Exception as e:
             print(f"[ERROR] 音频系统初始化失败: {str(e)}")
@@ -399,77 +418,52 @@ class QuQuFletApp:
     def populate_audio_devices(self):
         """填充音频设备列表 - 增强 WASAPI 支持"""
         try:
-            device_count = self.audio.get_device_count()
-            print(f"[DEBUG] 使用 {AUDIO_BACKEND} 检测到 {device_count} 个音频设备:")
+            if not self.audio_engine:
+                raise RuntimeError("音频引擎不可用")
 
-            input_devices = []
-            wasapi_devices = []
-            default_device_index = None
+            devices = self.audio_engine.list_input_devices()
+            print(f"[DEBUG] 使用 {self.audio_engine.backend_name} 检测到 {len(devices)} 个音频设备")
 
-            try:
-                default_info = self.audio.get_default_input_device_info()
-                default_device_index = default_info['index']
-                print(f"[DEBUG] 默认输入设备: {default_info['name']}")
-            except Exception as e:
-                print(f"[WARNING] 无法获取默认输入设备: {e}")
+            options: List[ft.dropdown.Option] = []
+            wasapi_candidates: List[int] = []
+            default_device: Optional[int] = None
 
-            for i in range(device_count):
-                try:
-                    device_info = self.audio.get_device_info_by_index(i)
-                    if device_info['maxInputChannels'] > 0:
-                        name = device_info['name']
-                        is_default = i == default_device_index
+            for device in devices:
+                tags = []
+                if device.is_wasapi:
+                    tags.append("WASAPI")
+                if device.is_loopback:
+                    tags.append("Loopback")
+                tag_suffix = f" [{' '.join(tags)}]" if tags else ""
+                display_name = f"{device.name}{tag_suffix} {'(默认)' if device.is_default else ''}"
 
-                        # 检测 WASAPI 设备
-                        is_wasapi = 'WASAPI' in str(device_info.get('hostApi', '')) or 'Windows WASAPI' in name
-                        is_loopback = 'loopback' in name.lower() or 'stereo mix' in name.lower()
+                options.append(ft.dropdown.Option(key=str(device.index), text=display_name))
 
-                        device_type = ""
-                        if is_wasapi:
-                            device_type = " [WASAPI]"
-                        if is_loopback:
-                            device_type += " [Loopback]"
+                print(
+                    f"[DEBUG]   [{device.index}] {device.name} - 输入通道: {device.max_input_channels}"
+                    f"{tag_suffix} {'(默认)' if device.is_default else ''}"
+                )
 
-                        display_name = f"{name}{device_type} {'(默认)' if is_default else ''}"
+                if device.is_default:
+                    default_device = device.index
+                elif device.is_wasapi:
+                    wasapi_candidates.append(device.index)
 
-                        input_devices.append(ft.dropdown.Option(
-                            key=str(i),
-                            text=display_name
-                        ))
+            chosen = default_device
+            if chosen is None and wasapi_candidates:
+                chosen = wasapi_candidates[0]
+                print(f"[DEBUG] 优先选择 WASAPI 设备: {chosen}")
+            if chosen is None and options:
+                chosen = int(options[0].key)
 
-                        print(f"[DEBUG]   [{i}] {name} - 输入通道: {device_info['maxInputChannels']}{device_type} {'(默认)' if is_default else ''}")
+            self.selected_audio_device = chosen
+            self.audio_device_dropdown.options = options
+            if chosen is not None:
+                self.audio_device_dropdown.value = str(chosen)
 
-                        # 优先选择 WASAPI 设备
-                        if is_wasapi and not hasattr(self, 'selected_audio_device'):
-                            wasapi_devices.append(i)
-
-                        # 设置默认选择
-                        if is_default:
-                            self.selected_audio_device = i
-                            self.audio_device_dropdown.value = str(i)
-
-                except Exception as e:
-                    print(f"[WARNING] 无法读取设备 {i} 信息: {e}")
-
-            # 如果没有默认设备但有 WASAPI 设备，选择第一个 WASAPI 设备
-            if not hasattr(self, 'selected_audio_device') and wasapi_devices:
-                self.selected_audio_device = wasapi_devices[0]
-                self.audio_device_dropdown.value = str(wasapi_devices[0])
-                print(f"[DEBUG] 选择 WASAPI 设备: {wasapi_devices[0]}")
-
-            # 如果都没有，选择第一个可用设备
-            elif not hasattr(self, 'selected_audio_device') and input_devices:
-                self.selected_audio_device = int(input_devices[0].key)
-                self.audio_device_dropdown.value = input_devices[0].key
-
-            # 更新下拉菜单选项
-            self.audio_device_dropdown.options = input_devices
             self.page.update()
 
-            print(f"[DEBUG] 找到 {len(input_devices)} 个可用输入设备")
-            if wasapi_devices:
-                print(f"[DEBUG] 其中 {len(wasapi_devices)} 个是 WASAPI 设备")
-
+            print(f"[DEBUG] 找到 {len(options)} 个可用输入设备")
         except Exception as e:
             print(f"[ERROR] 填充音频设备列表失败: {e}")
 
@@ -503,6 +497,31 @@ class QuQuFletApp:
             auto_test_worker()
 
         self.page.run_thread(delayed_test)
+
+    def _build_stream_config(self, rate: int, chunk: int) -> AudioStreamConfig:
+        if not self.audio_engine:
+            raise RuntimeError("音频引擎不可用")
+        fmt = self.audio_format or self.audio_engine.audio_format
+        return AudioStreamConfig(
+            format=fmt,
+            channels=CHANNELS,
+            rate=rate,
+            chunk=chunk,
+            device_index=self.selected_audio_device,
+        )
+
+    def _probe_audio_configs(self, configs: List[AudioStreamConfig], backend_label: str) -> bool:
+        if not self.audio_engine:
+            raise RuntimeError("音频引擎不可用")
+
+        result = self.audio_engine.probe_stream(configs)
+        if result.success and result.config:
+            self.working_audio_config = result.config.to_dict()
+            self.audio_backend_type = backend_label
+            return True
+
+        print(f"[DEBUG] {backend_label} 测试失败: {result.message}")
+        return False
 
     def try_sounddevice_backend(self) -> bool:
         """尝试使用 sounddevice 作为音频后端"""
@@ -561,9 +580,13 @@ class QuQuFletApp:
         try:
             device_index = int(e.control.value)
             self.selected_audio_device = device_index
-            device_info = self.audio.get_device_info_by_index(device_index)
-            print(f"[DEBUG] 选择音频设备: [{device_index}] {device_info['name']}")
-            self.update_status(f"已选择设备: {device_info['name']}")
+            if self.audio_engine:
+                device_info = self.audio_engine.get_device_info_by_index(device_index)
+                device_name = device_info.get('name', f'设备 {device_index}')
+            else:
+                device_name = f'设备 {device_index}'
+            print(f"[DEBUG] 选择音频设备: [{device_index}] {device_name}")
+            self.update_status(f"已选择设备: {device_name}")
         except Exception as e:
             print(f"[ERROR] 设备选择失败: {e}")
 
@@ -588,7 +611,7 @@ class QuQuFletApp:
                 print(f"[DEBUG] 开始测试音频设备 {self.selected_audio_device}")
 
                 # 方法1：PyAudioWPatch WASAPI配置（优先）
-                if AUDIO_BACKEND == "PyAudioWPatch":
+                if self.audio_engine and self.audio_engine.backend_name == "PyAudioWPatch":
                     success = self.test_pyaudiowpatch_wasapi()
                     if success:
                         return
@@ -641,261 +664,80 @@ class QuQuFletApp:
     def test_pyaudiowpatch_wasapi(self) -> bool:
         """测试 PyAudioWPatch WASAPI 配置"""
         try:
-            print("[DEBUG] 尝试 PyAudioWPatch WASAPI 配置...")
-
-            # PyAudioWPatch 优化的 WASAPI 配置
-            wasapi_configs = [
-                {"rate": 48000, "chunk": 1024, "channels": 1},  # 首选配置
-                {"rate": 44100, "chunk": 2048, "channels": 1},  # 标准配置
-                {"rate": 16000, "chunk": 512, "channels": 1},   # 低延迟配置
-                {"rate": 22050, "chunk": 1024, "channels": 1},  # 中等配置
+            configs = [
+                self._build_stream_config(48_000, 1_024),
+                self._build_stream_config(44_100, 2_048),
+                self._build_stream_config(16_000, 512),
+                self._build_stream_config(22_050, 1_024),
             ]
-
-            for i, config in enumerate(wasapi_configs):
-                try:
-                    print(f"[DEBUG] 尝试 WASAPI 配置 {i+1}: {config}")
-                    test_stream = self.audio.open(
-                        format=pyaudio.paInt16,
-                        channels=config["channels"],
-                        rate=config["rate"],
-                        input=True,
-                        frames_per_buffer=config["chunk"],
-                        input_device_index=self.selected_audio_device,
-                        # PyAudioWPatch WASAPI 特定参数
-                        as_loopback=False,  # 设为 False 用于麦克风输入
-                        start=False
-                    )
-                    test_stream.start_stream()
-
-                    # 测试读取数据
-                    test_data_count = 0
-                    for j in range(10):
-                        try:
-                            data = test_stream.read(config["chunk"], exception_on_overflow=False)
-                            if len(data) > 0:
-                                audio_data = np.frombuffer(data, dtype=np.int16)
-                                rms_level = np.sqrt(np.mean(audio_data.astype(np.float32) ** 2))
-                                test_data_count += 1
-
-                                if j == 5:  # 中间显示测试进度
-                                    self.update_audio_visualization(f"🔊 WASAPI测试: {rms_level:.0f}", min(rms_level / 5000, 1.0), ft.Colors.GREEN_500)
-                        except Exception as read_e:
-                            print(f"[DEBUG] WASAPI 读取错误 {j}: {read_e}")
-                            continue
-
-                    test_stream.stop_stream()
-                    test_stream.close()
-
-                    if test_data_count >= 5:  # 至少成功读取5次
-                        # 保存工作配置
-                        self.working_audio_config = {
-                            "format": pyaudio.paInt16,
-                            "channels": config["channels"],
-                            "rate": config["rate"],
-                            "chunk": config["chunk"],
-                            "device_index": self.selected_audio_device
-                        }
-                        self.audio_backend_type = "pyaudiowpatch_wasapi"
-                        print(f"[DEBUG] PyAudioWPatch WASAPI 测试成功，配置: {config}")
-                        self.update_status(f"✅ WASAPI 设备测试成功 ({config['rate']}Hz)")
-                        return True
-
-                except Exception as config_e:
-                    print(f"[DEBUG] WASAPI 配置 {i+1} 失败: {config_e}")
-                    continue
-
-            print("[DEBUG] 所有 PyAudioWPatch WASAPI 配置都失败")
-            return False
-
-        except Exception as e:
-            print(f"[DEBUG] PyAudioWPatch WASAPI 测试异常: {e}")
+            success = self._probe_audio_configs(configs, "pyaudiowpatch_wasapi")
+            if success and self.working_audio_config:
+                rate = self.working_audio_config.get("rate", 0)
+                self.update_status(f"✅ WASAPI 设备测试成功 ({rate}Hz)")
+            return success
+        except Exception as exc:
+            print(f"[DEBUG] PyAudioWPatch WASAPI 测试异常: {exc}")
             return False
 
     def test_pyaudio_standard(self) -> bool:
         """测试标准PyAudio配置"""
         try:
-            print("[DEBUG] 尝试标准PyAudio配置...")
-            test_stream = self.audio.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-                input_device_index=self.selected_audio_device,
-                start=True
-            )
-
-            # 快速测试读取
-            for i in range(10):
-                data = test_stream.read(CHUNK, exception_on_overflow=False)
-                audio_data = np.frombuffer(data, dtype=np.int16)
-                rms_level = np.sqrt(np.mean(audio_data.astype(np.float32) ** 2))
-
-                if i == 5:  # 中间测试显示
-                    # 使用统一音频可视化
-                    self.update_audio_visualization(f"🔊 测试: {rms_level:.0f}", min(rms_level / 5000, 1.0), ft.Colors.GREEN_500)
-
-            test_stream.close()
-
-            # 保存工作配置
-            self.working_audio_config = {
-                "format": FORMAT,
-                "channels": CHANNELS,
-                "rate": RATE,
-                "chunk": CHUNK,
-                "device_index": self.selected_audio_device
-            }
-            self.audio_backend_type = "standard"
-
-            self.update_status("✅ 标准模式测试成功！")
-            print("[DEBUG] 标准PyAudio测试成功")
-            return True
-
-        except Exception as e:
-            print(f"[DEBUG] 标准PyAudio测试失败: {e}")
+            configs = [self._build_stream_config(RATE, CHUNK)]
+            success = self._probe_audio_configs(configs, "standard")
+            if success:
+                self.update_status("✅ 标准模式测试成功！")
+            return success
+        except Exception as exc:
+            print(f"[DEBUG] 标准PyAudio测试失败: {exc}")
             return False
 
     def test_pyaudio_wasapi(self) -> bool:
         """测试Windows WASAPI模式"""
         try:
-            print("[DEBUG] 尝试WASAPI模式...")
-            # 尝试不同的配置参数
             configs = [
-                {"rate": 44100, "chunk": 2048},
-                {"rate": 48000, "chunk": 1024},
-                {"rate": 16000, "chunk": 512},
+                self._build_stream_config(44_100, 2_048),
+                self._build_stream_config(48_000, 1_024),
+                self._build_stream_config(16_000, 512),
             ]
-
-            for config in configs:
-                try:
-                    test_stream = self.audio.open(
-                        format=pyaudio.paInt16,
-                        channels=1,
-                        rate=config["rate"],
-                        input=True,
-                        frames_per_buffer=config["chunk"],
-                        input_device_index=self.selected_audio_device,
-                        start=False
-                    )
-                    test_stream.start_stream()
-
-                    # 测试5次读取
-                    for i in range(5):
-                        data = test_stream.read(config["chunk"], exception_on_overflow=False)
-                        if len(data) > 0:
-                            audio_data = np.frombuffer(data, dtype=np.int16)
-                            rms_level = np.sqrt(np.mean(audio_data.astype(np.float32) ** 2))
-                            print(f"[DEBUG] WASAPI测试读取成功，RMS: {rms_level}")
-
-                    test_stream.close()
-
-                    # 保存工作配置
-                    self.working_audio_config = {
-                        "format": pyaudio.paInt16,
-                        "channels": 1,
-                        "rate": config["rate"],
-                        "chunk": config["chunk"],
-                        "device_index": self.selected_audio_device
-                    }
-                    self.audio_backend_type = "wasapi"
-
-                    self.update_status(f"✅ WASAPI模式测试成功！({config['rate']}Hz)")
-                    return True
-
-                except Exception as e:
-                    if 'test_stream' in locals() and test_stream:
-                        test_stream.close()
-                    print(f"[DEBUG] WASAPI配置 {config} 失败: {e}")
-                    continue
-
-            return False
-
-        except Exception as e:
-            print(f"[DEBUG] WASAPI测试失败: {e}")
+            success = self._probe_audio_configs(configs, "wasapi")
+            if success and self.working_audio_config:
+                rate = self.working_audio_config.get("rate", 0)
+                self.update_status(f"✅ WASAPI 模式测试成功 ({rate}Hz)")
+            return success
+        except Exception as exc:
+            print(f"[DEBUG] WASAPI 测试失败: {exc}")
             return False
 
     def test_pyaudio_directsound(self) -> bool:
         """测试DirectSound模式"""
         try:
-            print("[DEBUG] 尝试DirectSound模式...")
-
-            # 重新初始化PyAudio，强制DirectSound
-            self.audio.terminate()
-            import time
-            time.sleep(0.5)
-            self.audio = pyaudio.PyAudio()
-
-            test_stream = self.audio.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-                input_device_index=self.selected_audio_device
-            )
-
-            # 简单测试
-            data = test_stream.read(CHUNK * 2, exception_on_overflow=False)
-            test_stream.close()
-
-            if len(data) > 0:
-                # 保存工作配置
-                self.working_audio_config = {
-                    "format": FORMAT,
-                    "channels": CHANNELS,
-                    "rate": RATE,
-                    "chunk": CHUNK,
-                    "device_index": self.selected_audio_device
-                }
-                self.audio_backend_type = "directsound"
-
-                self.update_status("✅ DirectSound模式测试成功！")
-                return True
-
-            return False
-
-        except Exception as e:
-            print(f"[DEBUG] DirectSound测试失败: {e}")
+            configs = [self._build_stream_config(RATE, CHUNK)]
+            success = self._probe_audio_configs(configs, "directsound")
+            if success:
+                self.update_status("✅ DirectSound 模式测试成功！")
+            return success
+        except Exception as exc:
+            print(f"[DEBUG] DirectSound 测试失败: {exc}")
             return False
 
     def test_system_default(self) -> bool:
         """测试系统默认设备"""
         try:
-            print("[DEBUG] 尝试系统默认设备...")
-
-            test_stream = self.audio.open(
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-                # 不指定设备，使用系统默认
-                input_device_index=None
-            )
-
-            data = test_stream.read(CHUNK, exception_on_overflow=False)
-            test_stream.close()
-
-            if len(data) > 0:
-                # 保存工作配置
-                self.working_audio_config = {
-                    "format": FORMAT,
-                    "channels": CHANNELS,
-                    "rate": RATE,
-                    "chunk": CHUNK,
-                    "device_index": None
-                }
-                self.audio_backend_type = "system_default"
-
-                self.update_status("✅ 系统默认设备测试成功！")
-                # 更新选择为默认设备
-                self.selected_audio_device = None
-                return True
-
-            return False
-
-        except Exception as e:
-            print(f"[DEBUG] 系统默认设备测试失败: {e}")
+            if not self.audio_engine:
+                raise RuntimeError("音频引擎不可用")
+            default_info = self.audio_engine.get_default_input_device_info()
+            default_index = default_info.get('index')
+            default_name = default_info.get('name', '默认设备')
+            self.selected_audio_device = default_index
+            if default_index is not None:
+                self.audio_device_dropdown.value = str(default_index)
+            configs = [self._build_stream_config(RATE, CHUNK)]
+            success = self._probe_audio_configs(configs, "system_default")
+            if success:
+                self.update_status(f"✅ 系统默认设备测试成功: {default_name}")
+            return success
+        except Exception as exc:
+            print(f"[DEBUG] 系统默认设备测试失败: {exc}")
             return False
 
     def toggle_recording(self, e):
@@ -908,6 +750,10 @@ class QuQuFletApp:
     def start_recording(self):
         """开始录音 - 使用经过测试的音频配置"""
         try:
+            if not self.audio_engine:
+                self.update_status("❌ 音频引擎不可用")
+                return
+
             # 检查是否有经过测试的音频配置
             if not self.working_audio_config:
                 self.update_status("⚠️ 请先测试音频设备")
@@ -938,15 +784,8 @@ class QuQuFletApp:
             print(f"[DEBUG] 使用{self.audio_backend_type}后端配置开始录音")
             print(f"[DEBUG] 配置: {config}")
 
-            self.audio_stream = self.audio.open(
-                format=config["format"],
-                channels=config["channels"],
-                rate=config["rate"],
-                input=True,
-                frames_per_buffer=config["chunk"],
-                input_device_index=config["device_index"],
-                start=True
-            )
+            stream_config = AudioStreamConfig.from_dict(config)
+            self.audio_stream = self.audio_engine.open_input_stream(stream_config)
 
             print(f"[DEBUG] 音频流已创建并启动，使用{self.audio_backend_type}后端")
 
@@ -1149,7 +988,8 @@ class QuQuFletApp:
             original_file = os.path.join(temp_dir, f"ququ_recording_original_{timestamp}.wav")
             with wave.open(original_file, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
-                wf.setsampwidth(self.audio.get_sample_size(FORMAT))
+                sample_width = self.audio_engine.get_sample_size() if self.audio_engine else 2
+                wf.setsampwidth(sample_width)
                 wf.setframerate(RATE)
                 wf.writeframes(b''.join(self.audio_frames))
 
@@ -1162,7 +1002,8 @@ class QuQuFletApp:
                 self.current_audio_file = os.path.join(temp_dir, f"ququ_recording_enhanced_{timestamp}.wav")
                 with wave.open(self.current_audio_file, 'wb') as wf:
                     wf.setnchannels(CHANNELS)
-                    wf.setsampwidth(self.audio.get_sample_size(FORMAT))
+                    sample_width = self.audio_engine.get_sample_size() if self.audio_engine else 2
+                    wf.setsampwidth(sample_width)
                     wf.setframerate(RATE)
                     # 将numpy数组转换回字节
                     enhanced_bytes = (enhanced_audio_data * 32767).astype(np.int16).tobytes()
@@ -1964,8 +1805,8 @@ class QuQuFletApp:
                 self.audio_stream.stop_stream()
                 self.audio_stream.close()
 
-            if hasattr(self, 'audio'):
-                self.audio.terminate()
+            if self.audio_engine:
+                self.audio_engine.terminate()
 
             # 清理临时文件
             if self.current_audio_file and os.path.exists(self.current_audio_file):

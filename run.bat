@@ -37,7 +37,7 @@ echo [INFO] 启动 Flet 应用...
 echo [提示] 应用启动后会打开 GUI 窗口
 echo.
 
-.venv\Scripts\python.exe flet_app.py
+.venv\Scripts\python.exe main.py
 
 echo.
 echo [INFO] 应用运行完成

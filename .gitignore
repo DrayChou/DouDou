@@ -77,4 +77,10 @@ temp/
 .gyprc
 
 # Claude Code settings
-.claude/settings.local.json
+.claude/
+
+.lh/
+
+# Claude Code documentation
+CLAUDE.md
+AGENTS.md

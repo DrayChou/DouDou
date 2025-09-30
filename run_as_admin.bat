@@ -45,7 +45,7 @@ echo 💡 管理员权限可以解决音频驱动兼容性问题
 echo 💡 如果仍有问题，请检查麦克风权限设置
 echo.
 
-python flet_app.py
+python main.py
 
 echo.
 echo 📱 应用已退出

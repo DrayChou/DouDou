@@ -34,6 +34,8 @@
 - 🚀 **轻量快速**: 基于 Flet 框架，启动迅速，资源占用低
 - 🎨 **现代化界面**: 简洁美观的用户界面，操作直观
 - 🌐 **开放AI生态**: 支持任何兼容 OpenAI API 的服务
+- 🏗️ **模块化架构**: 采用清晰的分层设计，代码易于维护和扩展
+- 🔄 **组件化设计**: UI组件可复用，支持快速开发和迭代
 
 ---
 
@@ -62,12 +64,13 @@ source .venv/bin/activate
 pip install -e .
 
 # 4. 运行应用
-python flet_app.py
+python main.py
 ```
 
 #### 使用启动脚本 (Windows)
 
-双击 `run.bat` 文件即可启动应用。
+- **标准启动**: 双击 `run.bat` 文件即可启动应用
+- **管理员权限启动**: 如果遇到音频驱动问题，双击 `run_as_admin.bat` 文件以管理员权限启动（可以解决Windows音频设备兼容性问题）
 
 ### 3. 配置AI模型
 
@@ -84,10 +87,26 @@ python flet_app.py
 
 ```
 ququ_flet/
-├── flet_app.py          # 主应用文件
-├── funasr_server.py     # FunASR 服务
+├── main.py             # 应用入口文件
+├── src/                # 源代码目录
+│   ├── flet_app.py         # 主应用（协调器模式）
+│   ├── core/               # 核心业务逻辑
+│   │   ├── audio_engine.py      # 音频引擎
+│   │   ├── audio_recorder.py   # 录音管理器
+│   │   ├── transcription_handler.py  # 转写处理器
+│   │   ├── vad_system.py       # 语音活动检测
+│   │   ├── ai_integration.py   # AI集成
+│   │   └── recognition_pipeline.py  # 识别流水线
+│   ├── ui/                 # 用户界面
+│   │   ├── components.py       # UI组件
+│   │   └── dialogs.py          # 对话框
+│   ├── utils/              # 工具模块
+│   │   ├── config_manager.py   # 配置管理
+│   │   └── audio_utils.py      # 音频工具
+│   └── funasr_server.py    # FunASR 服务
 ├── download_models.py   # 模型下载脚本
 ├── run.bat             # Windows 启动脚本
+├── run_as_admin.bat    # 管理员权限启动脚本
 ├── pyproject.toml      # Python 项目配置
 ├── requirements.txt    # 依赖列表
 ├── assets/            # 图标资源
