@@ -19,9 +19,9 @@ class VADConfig:
 
     # 时间窗口参数
     MIN_SPEECH_DURATION = 0.5  # 最短语音片段(秒)
-    MAX_SPEECH_DURATION = 8.0  # 最长语音片段(秒)
-    SILENCE_TIMEOUT = 1.5      # 静音超时触发处理(秒)
-    MAX_WINDOW_SIZE = 10.0     # 强制分段的最大窗口(秒)
+    MAX_SPEECH_DURATION = 6.0  # 最长语音片段(秒) - 降低避免过长
+    SILENCE_TIMEOUT = 1.0      # 静音超时触发处理(秒) - 更快截断
+    MAX_WINDOW_SIZE = 8.0      # 强制分段的最大窗口(秒) - 降低
 
     # 能量检测参数
     ENERGY_THRESHOLD = 500     # 音频能量阈值

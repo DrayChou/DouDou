@@ -1,6 +1,7 @@
-@echo off
+﻿@echo off
+chcp 65001 >nul
 echo ========================================
-echo   蛐蛐 (QuQu) - 智能语音助手
+echo   DouDou - 智能语音助手
 echo ========================================
 echo.
 
@@ -9,27 +10,29 @@ if exist ".venv\Scripts\python.exe" (
     echo [INFO] 使用现有虚拟环境启动应用...
 
     REM 检查关键依赖是否已安装
-    .venv\Scripts\python.exe -c "import flet, pyaudio, numpy, librosa, torch" 2>nul
+    .venv\Scripts\python.exe -c "import flet, numpy" 2>nul
     if errorlevel 1 (
         echo [WARN] 依赖不完整，正在安装...
-        .venv\Scripts\python.exe -m pip install -e .
+        .venv\Scripts\python.exe -m pip install --upgrade pip
+        .venv\Scripts\python.exe -m pip install -r requirements.txt
     ) else (
         echo [INFO] 所有依赖已安装
     )
 ) else (
     echo [WARN] 虚拟环境不存在，正在创建...
 
-    REM 使用传统方式创建虚拟环境
+    REM 创建虚拟环境
     python -m venv .venv
     if errorlevel 1 (
         echo [ERROR] 虚拟环境创建失败
-        echo [提示] 请确保已安装 Python 3.11+
+        echo [提示] 请确保已安装 Python 3.9+
         pause
         exit /b 1
     )
 
     echo [INFO] 安装依赖包...
-    .venv\Scripts\python.exe -m pip install -e .
+    .venv\Scripts\python.exe -m pip install --upgrade pip
+    .venv\Scripts\python.exe -m pip install -r requirements.txt
 )
 
 echo.

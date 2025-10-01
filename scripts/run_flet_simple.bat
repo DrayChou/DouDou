@@ -1,5 +1,5 @@
 @echo off
-echo 蛐蛐 Flet 应用启动器 (标准 Python 虚拟环境)
+echo DouDou Flet 应用启动器 (标准 Python 虚拟环境)
 echo ================================================
 echo.
 

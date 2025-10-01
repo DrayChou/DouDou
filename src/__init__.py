@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""蛐蛐 (QuQu) - 智能语音助手主包。"""
+"""DouDou - 智能语音助手主包。"""
 
 __version__ = "1.0.0"
 __author__ = "QuQu Team"

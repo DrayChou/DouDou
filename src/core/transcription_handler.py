@@ -37,6 +37,7 @@ class TranscriptionHandler:
         self.on_transcription_complete: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_status_update: Optional[Callable[[str], None]] = None
         self.on_ai_optimization_complete: Optional[Callable[[str], None]] = None
+        self.get_context_history: Optional[Callable[[], list]] = None  # 获取上下文历史的回调
 
     def transcribe_audio_file(
         self,
@@ -89,7 +90,9 @@ class TranscriptionHandler:
 
                 # AI优化
                 if enable_ai_optimization and self.ai_processor and raw_text.strip():
-                    self._optimize_text_async(raw_text)
+                    # 获取上下文历史
+                    context_history = self.get_context_history() if self.get_context_history else []
+                    self._optimize_text_async(raw_text, context_history)
                 else:
                     self.update_status("转写完成")
 
@@ -107,25 +110,25 @@ class TranscriptionHandler:
         finally:
             self.is_processing = False
 
-    def optimize_text_async(self, raw_text: str):
+    def optimize_text_async(self, raw_text: str, context_history: Optional[list] = None):
         """异步AI文本优化"""
-        self._optimize_text_async(raw_text)
+        self._optimize_text_async(raw_text, context_history)
 
-    def _optimize_text_async(self, raw_text: str):
+    def _optimize_text_async(self, raw_text: str, context_history: Optional[list] = None):
         """异步AI文本优化（内部方法）"""
         thread = threading.Thread(
             target=self._ai_optimization_worker,
-            args=(raw_text,),
+            args=(raw_text, context_history),
             daemon=True
         )
         thread.start()
 
-    def _ai_optimization_worker(self, raw_text: str):
+    def _ai_optimization_worker(self, raw_text: str, context_history: Optional[list] = None):
         """AI优化工作线程"""
         try:
             self.update_status("AI正在优化文本...")
 
-            result = self.ai_processor.optimize_text(raw_text)
+            result = self.ai_processor.optimize_text(raw_text, context_history)
 
             if result.get("success"):
                 optimized_text = result.get("text", "").strip()
@@ -140,12 +143,21 @@ class TranscriptionHandler:
                 else:
                     self.update_status("文本无需优化")
             else:
+                # AI优化失败，直接在结果区显示错误，不占用状态栏
                 error_msg = result.get("error", "优化失败")
-                self.update_status(f"AI优化失败: {error_msg}")
+                if self.on_ai_optimization_complete:
+                    # 显示原始识别结果 + 错误提示
+                    self.on_ai_optimization_complete(
+                        f"{self.transcription_result}\n\n[提示: AI优化失败 - {error_msg}]"
+                    )
 
         except Exception as e:
             print(f"[TranscriptionHandler] AI优化异常: {e}")
-            self.update_status(f"AI优化异常: {str(e)}")
+            # 异常也显示在结果区，不占用状态栏
+            if self.on_ai_optimization_complete:
+                self.on_ai_optimization_complete(
+                    f"{self.transcription_result}\n\n[提示: AI优化出错 - {str(e)}]"
+                )
 
     def get_transcription_result(self) -> str:
         """获取转写结果"""

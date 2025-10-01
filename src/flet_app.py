@@ -73,16 +73,16 @@ class QuQuFletApp:
 
     def _setup_page(self):
         """设置页面基本属性"""
-        self.page.title = "蛐蛐 (QuQu) - 智能语音助手"
+        self.page.title = "DouDou - 智能语音助手"
         self.page.theme_mode = ft.ThemeMode.LIGHT
         self.page.vertical_alignment = ft.MainAxisAlignment.START
         self.page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
         # 窗口设置
-        self.page.window.width = 900
-        self.page.window.height = 600
-        self.page.window.min_width = 800
-        self.page.window.min_height = 500
+        self.page.window.width = 1200
+        self.page.window.height = 700
+        self.page.window.min_width = 1000
+        self.page.window.min_height = 600
         self.page.window.resizable = True
 
         # 设置图标
@@ -135,7 +135,9 @@ class QuQuFletApp:
         self.vad_segmenter = HybridVADSegmenter(sample_rate=16000, config=self.vad_config)
 
         # 多线程任务管理器
-        self.task_manager = TaskManager()
+        # 初始化TaskManager并传入识别器（从recognition_pipeline获取）
+        funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
+        self.task_manager = TaskManager(funasr_recognizer=funasr_recognizer)
         self.task_manager.start()
 
         # 连续录音器 - 用于实时模式
@@ -161,6 +163,8 @@ class QuQuFletApp:
 
         # 设置连续录音器回调
         self.continuous_recorder.on_segment_detected = self._on_audio_segment_detected
+        self.continuous_recorder.on_recording_started = self.on_recording_started
+        self.continuous_recorder.on_recording_stopped = lambda: self.on_continuous_recording_stopped()
         self.continuous_recorder.on_error = self._on_recorder_error
 
     def _setup_ui(self):
@@ -198,6 +202,9 @@ class QuQuFletApp:
             audio_engine=self.audio_engine,
             on_device_change=self.on_audio_device_change
         )
+
+        # 初始化按钮状态（根据设备可用性）
+        self._update_record_button_state()
 
         # 实时模式切换
         self.realtime_toggle = RealtimeModeToggle(
@@ -278,37 +285,37 @@ class QuQuFletApp:
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
         )
 
-        # 右侧面板（包含结果和任务监控）
-        right_panel = ft.Container(
-            expand=True,
+        # 中间面板（识别结果）
+        middle_panel = ft.Container(
+            expand=2,  # 占2份空间
             padding=ft.padding.all(15),
-            content=ft.Row([
-                # 识别结果区域
+            content=ft.Column([
+                # 设备信息区域
+                ft.Container(
+                    content=ft.Row([
+                        self.device_status_text,
+                    ], alignment=ft.MainAxisAlignment.START),
+                    padding=ft.padding.only(bottom=10),
+                ),
+                # 识别结果区域（占满剩余空间）
                 ft.Container(
                     expand=True,
-                    content=ft.Column([
-                        # 设备信息区域
-                        ft.Container(
-                            content=ft.Row([
-                                self.device_status_text,
-                            ], alignment=ft.MainAxisAlignment.START),
-                            padding=ft.padding.only(bottom=10),
-                        ),
-                        # 识别结果区域（占满剩余空间）
-                        ft.Container(
-                            expand=True,
-                            content=self.result_card.card
-                        ),
-                    ]),
+                    content=self.result_card.card
                 ),
-                # 任务监控面板
-                ft.Container(width=10),  # 间距
-                self.task_monitor.get_control(),
             ]),
+        )
+
+        # 右侧面板（任务监控）
+        right_panel = ft.Container(
+            width=280,  # 固定宽度
+            padding=ft.padding.all(15),
+            content=self.task_monitor.get_control(),
         )
 
         return ft.Row([
             left_panel,
+            ft.VerticalDivider(width=1),
+            middle_panel,
             ft.VerticalDivider(width=1),
             right_panel,
         ], expand=True)
@@ -325,6 +332,7 @@ class QuQuFletApp:
         self.transcription_handler.on_transcription_complete = self.on_transcription_complete
         self.transcription_handler.on_status_update = self.update_status
         self.transcription_handler.on_ai_optimization_complete = self.on_ai_optimization_complete
+        self.transcription_handler.get_context_history = self.get_context_history
 
         # VAD回调
         self.vad_segmenter.on_segment_detected = self.on_vad_segment_detected
@@ -336,18 +344,30 @@ class QuQuFletApp:
             self.update_status("音频引擎未初始化，请检查音频设备")
             return
 
-        if self.audio_recorder.is_recording:
-            self.audio_recorder.stop_recording()
+        # 根据实时模式选择不同的录音方式
+        if self.realtime_toggle.is_realtime:
+            # 实时模式：使用连续录音器（VAD自动分段+实时识别）
+            if self.continuous_recorder.is_recording:
+                self.continuous_recorder.stop_continuous_recording()
+            else:
+                success = self.continuous_recorder.start_continuous_recording()
+                if not success:
+                    self.update_status("启动实时录音失败")
+                    self.realtime_toggle.set_realtime(False)
         else:
-            from core.audio_engine import AudioStreamConfig
-            stream_config = AudioStreamConfig(
-                format=self.audio_engine.audio_format,
-                channels=self.audio_engine.channels,
-                rate=self.audio_engine.sample_rate,
-                chunk=self.audio_engine.chunk_size,
-                device_index=self.audio_recorder.device_index
-            )
-            self.audio_recorder.start_recording(stream_config)
+            # 普通模式：使用标准录音器（手动开始/停止）
+            if self.audio_recorder.is_recording:
+                self.audio_recorder.stop_recording()
+            else:
+                from core.audio_engine import AudioStreamConfig
+                stream_config = AudioStreamConfig(
+                    format=self.audio_engine.audio_format,
+                    channels=self.audio_engine.channels,
+                    rate=self.audio_engine.sample_rate,
+                    chunk=self.audio_engine.chunk_size,
+                    device_index=self.audio_recorder.device_index
+                )
+                self.audio_recorder.start_recording(stream_config)
 
     def on_recording_started(self):
         """录音开始回调"""
@@ -357,7 +377,7 @@ class QuQuFletApp:
         self.page.update()
 
     def on_recording_stopped(self, audio_file: str):
-        """录音停止回调"""
+        """录音停止回调（普通模式）"""
         print(f"[DEBUG] 录音停止回调触发，音频文件: {audio_file}")
         self.record_button.set_recording_state(False)
         self.audio_visualization.set_recording(False)
@@ -373,6 +393,14 @@ class QuQuFletApp:
             )
         else:
             print(f"[DEBUG] 没有音频文件，跳过转写")
+
+    def on_continuous_recording_stopped(self):
+        """连续录音停止回调（实时模式）"""
+        print(f"[DEBUG] 连续录音停止")
+        self.record_button.set_recording_state(False)
+        self.audio_visualization.set_recording(False)
+        self.update_status("实时录音已停止")
+        self.page.update()
 
     def update_audio_level(self, level: float):
         """更新音频级别显示"""
@@ -408,6 +436,8 @@ class QuQuFletApp:
         self.audio_recorder.set_device(device_index)
         # 更新设备状态显示
         self.update_device_status(device_index)
+        # 更新录音按钮状态（有设备才能录音）
+        self._update_record_button_state()
 
     def update_device_status(self, device_index: Optional[int]):
         """更新设备状态显示"""
@@ -424,32 +454,40 @@ class QuQuFletApp:
             self.device_status_text.value = "音频设备: 未知设备"
             self.page.update()
 
+    def _update_record_button_state(self):
+        """更新录音按钮状态（根据设备选择）"""
+        # 检查是否有可用设备
+        has_options = len(self.audio_device_selector.dropdown.options) > 0
+
+        # 如果有可用设备但未选择，禁用按钮
+        if has_options:
+            has_selected = self.audio_device_selector.dropdown.value is not None
+            self.record_button.button.disabled = not has_selected
+        else:
+            # 没有可用设备，禁用按钮
+            self.record_button.button.disabled = True
+
+        if self.page:
+            self.page.update()
+
     # 实时模式
     def toggle_realtime_mode(self, is_realtime: bool):
         """切换实时模式"""
         if is_realtime:
-            # 启动连续录音
-            try:
-                success = self.continuous_recorder.start_continuous_recording()
-                if success:
-                    self.update_status("实时模式已开启")
-                    self.record_button.set_recording_state(True)
-                else:
-                    self.update_status("启动实时模式失败")
-                    self.realtime_toggle.set_realtime(False)
-            except Exception as e:
-                print(f"[ERROR] 启动连续录音失败: {e}")
-                self.update_status(f"启动实时模式失败: {e}")
-                self.realtime_toggle.set_realtime(False)
+            # 只是切换模式，不自动开始录音
+            self.update_status("实时模式已开启（点击'开始录音'以启动）")
         else:
-            # 停止连续录音
-            try:
-                self.continuous_recorder.stop_continuous_recording()
+            # 如果正在录音，停止连续录音
+            if self.continuous_recorder.is_recording:
+                try:
+                    self.continuous_recorder.stop_continuous_recording()
+                    self.update_status("实时模式已关闭")
+                    self.record_button.set_recording_state(False)
+                except Exception as e:
+                    print(f"[ERROR] 停止连续录音失败: {e}")
+                    self.update_status(f"停止实时模式失败: {e}")
+            else:
                 self.update_status("实时模式已关闭")
-                self.record_button.set_recording_state(False)
-            except Exception as e:
-                print(f"[ERROR] 停止连续录音失败: {e}")
-                self.update_status(f"停止实时模式失败: {e}")
 
     def on_vad_segment_detected(self, segment):
         """VAD段落检测回调（旧的，保留兼容性）"""
@@ -516,12 +554,20 @@ class QuQuFletApp:
         if self.ai_processor:
             text = self.result_card.get_result()
             if text:
-                self.transcription_handler.optimize_text_async(text)
+                # 获取最近3条上下文（不包括当前文本）
+                all_recent = self.result_card.get_recent_results(4)  # 获取最近4条
+                context_history = all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
+                self.transcription_handler.optimize_text_async(text, context_history)
 
     def clear_result(self, e=None):
         """清空结果"""
         self.result_card.clear_result()
         self.transcription_handler.clear_result()
+
+    def get_context_history(self) -> list:
+        """获取识别结果的上下文历史（最近3条，不包括当前最新的）"""
+        all_recent = self.result_card.get_recent_results(4)  # 获取最近4条
+        return all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
 
     # 对话框
     def open_settings(self, e=None):

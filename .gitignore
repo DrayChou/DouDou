@@ -20,6 +20,16 @@ venv.bak/
 .env.test.local
 .env.production.local
 
+# Build artifacts (removed PyInstaller/Flet build, using simple venv approach)
+*.spec
+build/
+build_env/
+release/
+dist/
+
+# Flet cache
+.flet/
+
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -84,4 +94,4 @@ temp/
 # Claude Code documentation
 CLAUDE.md
 AGENTS.md
-/build_env
+

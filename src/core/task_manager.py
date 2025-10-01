@@ -135,7 +135,7 @@ class TaskStatistics:
 class TaskManager:
     """任务管理器 - 协调各个线程池的工作"""
 
-    def __init__(self):
+    def __init__(self, funasr_recognizer=None):
         # 任务队列
         self.audio_queue = queue.PriorityQueue(maxsize=100)
         self.recognition_queue = queue.PriorityQueue(maxsize=50)
@@ -146,6 +146,9 @@ class TaskManager:
         self.audio_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="Audio")
         self.recognition_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="Recognition")
         self.ai_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AI")
+
+        # FunASR识别器
+        self.funasr_recognizer = funasr_recognizer
 
         # 任务跟踪
         self.active_tasks: Dict[str, Any] = {}  # task_id -> task
@@ -335,15 +338,32 @@ class TaskManager:
                 self.statistics.recognition_processing += 1
                 self.statistics.recognition_pending -= 1
 
-            # 这里应该调用实际的识别服务
-            # 暂时返回模拟结果
-            time.sleep(0.1)  # 模拟识别耗时
-            result = {
-                'success': True,
-                'text': '模拟识别结果',
-                'confidence': 0.95,
-                'duration': task.audio_segment.duration
-            }
+            # 使用真实的FunASR识别
+            if self.funasr_recognizer:
+                try:
+                    funasr_result = self.funasr_recognizer.transcribe_audio(task.audio_segment.file_path)
+                    result = {
+                        'success': funasr_result.get('success', False),
+                        'text': funasr_result.get('text', ''),
+                        'confidence': funasr_result.get('confidence', 0.0),
+                        'duration': funasr_result.get('duration', task.audio_segment.duration)
+                    }
+                except Exception as e:
+                    logger.error(f"FunASR识别失败: {e}")
+                    result = {
+                        'success': False,
+                        'text': f'识别失败: {str(e)}',
+                        'confidence': 0.0,
+                        'duration': task.audio_segment.duration
+                    }
+            else:
+                # 降级：没有识别器时返回提示
+                result = {
+                    'success': False,
+                    'text': '[未配置识别器]',
+                    'confidence': 0.0,
+                    'duration': task.audio_segment.duration
+                }
 
             task.result = result
 

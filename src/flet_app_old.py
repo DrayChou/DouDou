@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-蛐蛐 (QuQu) - Flet 原型应用
+DouDou - Flet 原型应用
 基于 Flet 的现代化语音转文字应用
 """
 
@@ -53,7 +53,7 @@ class PendingSegment:
 class QuQuFletApp:
     def __init__(self, page: ft.Page):
         self.page = page
-        self.page.title = "蛐蛐 (QuQu) - 智能语音助手"
+        self.page.title = "DouDou - 智能语音助手"
         self.page.theme_mode = ft.ThemeMode.LIGHT
         self.page.vertical_alignment = ft.MainAxisAlignment.START
         self.page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
@@ -124,7 +124,7 @@ class QuQuFletApp:
         self.header = ft.Column(
             [
                 ft.Text(
-                    "🎤 蛐蛐 (QuQu)",
+                    "🎤 DouDou",
                     size=32,
                     weight=ft.FontWeight.BOLD,
                     color=ft.Colors.BLUE_700,
@@ -1669,7 +1669,7 @@ class QuQuFletApp:
             ft.Container(
                 content=ft.Column([
                     ft.Text("步骤 1: 关闭当前应用", weight=ft.FontWeight.BOLD, color=ft.Colors.RED_700),
-                    ft.Text("• 关闭这个蛐蛐应用窗口", color=ft.Colors.GREY_600),
+                    ft.Text("• 关闭这个DouDou应用窗口", color=ft.Colors.GREY_600),
                     ft.Text("• 关闭当前的命令提示符窗口", color=ft.Colors.GREY_600),
                 ]),
                 padding=10,

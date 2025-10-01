@@ -1,4 +1,4 @@
-# 蛐蛐 Flet 版本 - 标准 Python 虚拟环境设置指南
+# DouDou Flet 版本 - 标准 Python 虚拟环境设置指南
 
 ## 🐍 使用标准 Python 虚拟环境
 

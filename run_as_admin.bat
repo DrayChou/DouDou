@@ -1,6 +1,6 @@
 ﻿@echo off
-REM 蛐蛐 Flet 应用 - 管理员权限启动器
-echo 蛐蛐语音助手 - 管理员权限启动
+REM DouDou Flet 应用 - 管理员权限启动器
+echo DouDou语音助手 - 管理员权限启动
 echo ====================================
 
 REM 检查是否已经是管理员权限
@@ -39,7 +39,7 @@ if errorlevel 1 (
     pip install -r requirements.txt
 )
 
-echo 🚀 启动蛐蛐语音助手（管理员模式）...
+echo 🚀 启动DouDou语音助手（管理员模式）...
 echo.
 echo 💡 管理员权限可以解决音频驱动兼容性问题
 echo 💡 如果仍有问题，请检查麦克风权限设置

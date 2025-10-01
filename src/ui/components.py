@@ -286,6 +286,10 @@ class ResultCard:
 
         self.results_list.controls.append(result_container)
 
+        # 强制滚动到底部
+        if self.results_list.page:
+            self.results_list.scroll_to(offset=-1, duration=300)
+
     def set_text(self, text: str, color: Optional[str] = None):
         """设置结果文本（兼容方法）"""
         if not text or text == "点击录音按钮开始...":
@@ -307,6 +311,18 @@ class ResultCard:
                     if isinstance(text_control, ft.Text):
                         return text_control.value or ""
         return ""
+
+    def get_recent_results(self, count: int = 3) -> list:
+        """获取最近N条结果文本列表"""
+        results = []
+        for control in reversed(self.results_list.controls):
+            if len(results) >= count:
+                break
+            if isinstance(control.content, ft.Column) and len(control.content.controls) >= 2:
+                text_control = control.content.controls[1]
+                if isinstance(text_control, ft.Text) and text_control.value:
+                    results.append(text_control.value)
+        return list(reversed(results))  # 返回正序（旧→新）
 
     def clear_result(self):
         """清空结果"""
@@ -434,16 +450,24 @@ class RealtimeModeToggle:
             on_change: 模式变更回调
         """
         self.is_realtime = False
+        self.on_change_callback = on_change
         self.switch = ft.Switch(
             label="实时模式",
             value=False,
-            on_change=lambda e: self._handle_toggle(e, on_change),
+            on_change=lambda e: self._handle_toggle(e),
         )
 
-    def _handle_toggle(self, e, on_change: Callable):
+    def _handle_toggle(self, e):
         """处理切换事件"""
-        self.is_realtime = e.data
-        on_change(e.data)
+        self.is_realtime = e.data == "true" if isinstance(e.data, str) else e.data
+        self.on_change_callback(self.is_realtime)
+
+    def set_realtime(self, enabled: bool):
+        """设置实时模式状态"""
+        self.is_realtime = enabled
+        self.switch.value = enabled
+        if self.switch.page:
+            self.switch.update()
 
     def get_control(self) -> ft.Control:
         """获取Flet控件"""

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Callable
 
-from .audio_engine import AudioEngine
+from .audio_engine import AudioEngine, AudioStreamConfig
 from .vad_system import HybridVADSegmenter, VADSegment
 from .task_manager import TaskManager, AudioSegment
 
@@ -137,14 +137,16 @@ class ContinuousAudioRecorder:
         self.is_recording = False
         self.is_continuous = False
 
-        # 等待录音线程结束
+        # 等待录音线程结束（避免在当前线程中join自己）
         if self.recording_thread and self.recording_thread.is_alive():
-            self.recording_thread.join(timeout=5.0)
+            current_thread = threading.current_thread()
+            if self.recording_thread != current_thread:
+                self.recording_thread.join(timeout=5.0)
 
         # 清理音频流
         if self.audio_stream:
             try:
-                self.audio_engine.stop_stream(self.audio_stream)
+                self.audio_engine.close_stream(self.audio_stream)
                 self.audio_stream = None
             except Exception as e:
                 logger.error(f"停止音频流失败: {e}")
@@ -168,12 +170,14 @@ class ContinuousAudioRecorder:
     def _continuous_recording_loop(self):
         """连续录音主循环"""
         try:
-            # 打开音频流
-            self.audio_stream = self.audio_engine.open_stream(
-                sample_rate=self.config.sample_rate,
-                channels=self.config.channels,
-                chunk_size=self.config.chunk_size,
-                format=self.config.format
+            # 打开音频流（使用audio_engine的默认格式）
+            self.audio_stream = self.audio_engine.open_input_stream(
+                config=AudioStreamConfig(
+                    rate=self.config.sample_rate,
+                    channels=self.config.channels,
+                    chunk=self.config.chunk_size,
+                    format=self.audio_engine.audio_format  # 使用引擎的格式常量
+                )
             )
 
             logger.info("音频流已打开，开始连续录音")
@@ -186,8 +190,11 @@ class ContinuousAudioRecorder:
 
                 # 读取音频数据
                 try:
-                    chunk = self.audio_engine.read_chunk(self.audio_stream, timeout=0.1)
-                    if chunk is None:
+                    chunk = self.audio_stream.read(
+                        self.config.chunk_size,
+                        exception_on_overflow=False
+                    )
+                    if not chunk:
                         continue
 
                     # VAD处理
@@ -212,7 +219,7 @@ class ContinuousAudioRecorder:
             # 清理
             if self.audio_stream:
                 try:
-                    self.audio_engine.stop_stream(self.audio_stream)
+                    self.audio_engine.close_stream(self.audio_stream)
                 except:
                     pass
                 self.audio_stream = None

@@ -26,12 +26,13 @@ class AIProcessor:
         self.base_url = base_url
         self.model_name = model_name
 
-    def optimize_text(self, text: str) -> Dict[str, Any]:
+    def optimize_text(self, text: str, context_history: Optional[list] = None) -> Dict[str, Any]:
         """
         使用AI优化文本
 
         Args:
             text: 需要优化的原始文本
+            context_history: 上下文历史（最近3条识别结果）
 
         Returns:
             Dict: 优化结果，包含以下字段：
@@ -47,17 +48,25 @@ class AIProcessor:
                     "error": "AI配置不完整，请在设置中配置API Key、Base URL和模型名称"
                 }
 
+            # 构建上下文部分
+            context_section = ""
+            if context_history and len(context_history) > 0:
+                context_section = "\n\n上下文参考（之前的识别结果）：\n"
+                for i, ctx in enumerate(context_history, 1):
+                    context_section += f"{i}. {ctx}\n"
+
             # 构建优化提示词
             optimization_prompt = f"""请优化以下语音识别文本，修正可能的识别错误，补充标点符号，使其更符合中文表达习惯：
-
-原文：{text}
+{context_section}
+当前需要优化的文本：{text}
 
 优化要求：
-1. 修正明显的语音识别错误
-2. 添加适当的标点符号
-3. 保持原意不变
-4. 使表达更加流畅自然
-5. 如果原文已经很好，可以不做修改
+1. 参考上下文理解当前文本的语境
+2. 修正明显的语音识别错误
+3. 添加适当的标点符号
+4. 保持原意不变
+5. 使表达更加流畅自然
+6. 如果原文已经很好，可以不做修改
 
 请直接返回优化后的文本，不要添加任何解释："""
 

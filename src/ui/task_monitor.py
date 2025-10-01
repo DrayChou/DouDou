@@ -12,7 +12,12 @@ from typing import Optional, Dict, Any
 
 import flet as ft
 
-from ..core.task_manager import TaskManager, TaskStatistics
+try:
+    # 尝试相对导入（开发环境）
+    from ..core.task_manager import TaskManager, TaskStatistics
+except ImportError:
+    # 回退到绝对导入（打包环境）
+    from core.task_manager import TaskManager, TaskStatistics
 
 
 class TaskMonitor:
@@ -154,7 +159,9 @@ class TaskMonitor:
                                         on_click=self._clear_logs,
                                         width=50,
                                         height=25,
-                                        text_size=10
+                                        style=ft.ButtonStyle(
+                                            text_style=ft.TextStyle(size=10)
+                                        )
                                     ),
                                     alignment=ft.alignment.center
                                 )
@@ -183,8 +190,15 @@ class TaskMonitor:
         return self.status_container
 
     def _build_task_status_row(self, label: str, progress_ring: ft.ProgressRing,
-                              count_text: ft.Text, color: ft.Color) -> ft.Row:
+                              count_text: ft.Text, color) -> ft.Row:
         """构建任务状态行"""
+        # 创建带透明度的背景色
+        # ft.Colors常量返回的是字符串颜色值（如"#2196F3"），添加透明度
+        if isinstance(color, str) and color.startswith("#"):
+            bg_color = f"{color}20"  # 添加20透明度 (约12%)
+        else:
+            bg_color = ft.Colors.GREY_100
+
         return ft.Row([
             ft.Text(label, size=12, width=40, color=color),
             progress_ring,
@@ -194,7 +208,7 @@ class TaskMonitor:
                 content=ft.Text("处理中", size=10, color=color),
                 width=40,
                 height=16,
-                bgcolor=color.replace(0x88, 0x20),  # 透明版本
+                bgcolor=bg_color,
                 border_radius=8,
                 alignment=ft.alignment.center,
                 key=f"{label}_status"
@@ -219,10 +233,10 @@ class TaskMonitor:
         self._update_progress_ring(self.progress_recognition, stats.recognition_processing, total_pending + total_processing)
         self._update_progress_ring(self.progress_ai, stats.ai_processing, total_pending + total_processing)
 
-        # 更新计数文本
-        self.audio_count_text.value = str(stats.audio_processing)
-        self.recognition_count_text.value = str(stats.recognition_processing)
-        self.ai_count_text.value = str(stats.ai_processing)
+        # 更新计数文本 - 显示 (待处理+处理中) 的数量
+        self.audio_count_text.value = str(stats.audio_pending + stats.audio_processing)
+        self.recognition_count_text.value = str(stats.recognition_pending + stats.recognition_processing)
+        self.ai_count_text.value = str(stats.ai_pending + stats.ai_processing)
 
         # 更新总计和成功率
         total_count = stats.total_processed + stats.total_failed
@@ -274,14 +288,21 @@ class TaskMonitor:
                 icon=ft.Icons.ERROR
             )
 
-    def _add_log_entry(self, timestamp: str, message: str, color: ft.Color, icon):
+    def _add_log_entry(self, timestamp: str, message: str, color, icon):
         """添加日志条目"""
+        # 创建淡背景色
+        if isinstance(color, str) and color.startswith("#"):
+            bg_color = f"{color}10"  # 添加10透明度 (约6%)
+        else:
+            bg_color = ft.Colors.GREY_50
+
         log_entry = ft.Container(
             content=ft.Row([
                 ft.Text(timestamp, size=10, color=ft.Colors.GREY_600, width=50),
                 ft.Icon(icon, color=color, size=12),
-                ft.Expanded(
-                    child=ft.Text(
+                ft.Container(
+                    expand=True,  # 使用expand代替Expanded
+                    content=ft.Text(
                         message,
                         size=11,
                         color=ft.Colors.BLACK87,
@@ -290,7 +311,7 @@ class TaskMonitor:
                 ),
             ], spacing=4),
             padding=ft.padding.symmetric(horizontal=4, vertical=2),
-            bgcolor=color.replace(0xFF, 0x10),  # 非常淡的背景色
+            bgcolor=bg_color,
             border_radius=4
         )
 
