@@ -115,10 +115,6 @@ class QuQuFletApp:
         # 识别流水线 - 使用直接集成模式
         self.recognition_pipeline = RecognitionPipeline(use_direct_integration=True)
 
-        # 预加载FunASR模型（启动时初始化一次，后续复用）
-        if self.recognition_pipeline.use_direct_integration and self.recognition_pipeline.direct_funasr:
-            self._initialize_funasr_models()
-
         # AI处理器
         self.ai_processor = None
         if self.settings.get("enable_ai_optimization", False):
@@ -255,6 +251,10 @@ class QuQuFletApp:
 
         # 启动任务监控
         self.task_monitor.start_monitoring()
+
+        # 预加载FunASR模型（UI初始化完成后，启动时加载一次，后续复用）
+        if self.recognition_pipeline.use_direct_integration and self.recognition_pipeline.direct_funasr:
+            self._initialize_funasr_models()
 
     def _build_main_layout(self) -> ft.Control:
         """构建主界面布局"""
