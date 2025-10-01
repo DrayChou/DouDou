@@ -258,6 +258,9 @@ class QuQuFletApp:
         # 初始化设备状态显示（必须在UI创建之后）
         self.update_device_status(None)
 
+        # 恢复上次选择的音频设备
+        self._restore_last_audio_device()
+
         # 启动任务监控
         self.task_monitor.start_monitoring()
 
@@ -457,6 +460,16 @@ class QuQuFletApp:
         # 更新录音按钮状态（有设备才能录音）
         self._update_record_button_state()
 
+        # 保存设备选择到配置
+        if device_index is not None:
+            device_name = self.audio_recorder.get_device_name(device_index)
+            self.settings["last_audio_device_index"] = device_index
+            self.settings["last_audio_device_name"] = device_name
+            self.config_manager.set("last_audio_device_index", device_index)
+            self.config_manager.set("last_audio_device_name", device_name)
+            self.config_manager.save()
+            print(f"[INFO] 已保存音频设备: {device_name} (索引: {device_index})")
+
     def update_device_status(self, device_index: Optional[int]):
         """更新设备状态显示"""
         try:
@@ -583,23 +596,31 @@ class QuQuFletApp:
 
     def summarize_results(self, e=None):
         """AI汇总所有识别结果"""
+        print("[DEBUG] summarize_results 被调用")
+
         if not self.ai_processor:
+            print("[DEBUG] AI处理器未配置")
             self.update_status("请先在设置中配置AI服务")
             return
 
         # 获取所有识别文本（排除汇总报告）
         texts = self.result_card.get_all_recognition_texts()
+        print(f"[DEBUG] 获取到 {len(texts)} 条识别记录")
+
         if not texts:
             self.update_status("没有可汇总的识别记录")
             return
 
         self.update_status(f"正在汇总 {len(texts)} 条识别记录...")
+        print(f"[DEBUG] 开始汇总，文本: {texts[:2]}...")  # 打印前2条
 
         # 异步执行汇总
         import threading
         def summarize_worker():
             try:
+                print("[DEBUG] 调用 AI summarize_text")
                 result = self.ai_processor.summarize_text(texts)
+                print(f"[DEBUG] AI返回结果: success={result.get('success')}, error={result.get('error')}")
 
                 if result.get("success"):
                     summary_text = result.get("text", "")
@@ -729,6 +750,52 @@ class QuQuFletApp:
         """获取识别结果的上下文历史（最近3条，不包括当前最新的）"""
         all_recent = self.result_card.get_recent_results(4)  # 获取最近4条
         return all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
+
+    def _restore_last_audio_device(self):
+        """恢复上次选择的音频设备"""
+        try:
+            last_device_index = self.settings.get("last_audio_device_index")
+            last_device_name = self.settings.get("last_audio_device_name")
+
+            if last_device_index is not None:
+                print(f"[INFO] 尝试恢复音频设备: {last_device_name} (索引: {last_device_index})")
+
+                # 获取当前可用设备列表
+                devices = self.audio_engine.list_input_devices()
+
+                # 验证设备是否仍然存在
+                device_valid = False
+                for device in devices:
+                    if device.index == last_device_index:
+                        # 设备索引匹配，进一步验证名称
+                        if last_device_name and device.name == last_device_name:
+                            device_valid = True
+                            print(f"[INFO] 设备验证成功: {device.name}")
+                        elif not last_device_name:
+                            # 没有保存名称，只验证索引
+                            device_valid = True
+                            print(f"[INFO] 设备索引匹配: {device.name}")
+                        break
+
+                if device_valid:
+                    # 设置设备
+                    self.audio_device_selector.set_selected_device(last_device_index)
+                    self.audio_device_selector.dropdown.update()
+
+                    # 触发设备变更（但不重复保存）
+                    self.audio_recorder.set_device(last_device_index)
+                    self.update_device_status(last_device_index)
+                    self._update_record_button_state()
+
+                    print(f"[INFO] 已自动选择音频设备: {last_device_name}")
+                else:
+                    print(f"[WARN] 上次使用的设备不存在，使用默认设备")
+                    # 清除无效的设备配置
+                    self.settings["last_audio_device_index"] = None
+                    self.settings["last_audio_device_name"] = None
+
+        except Exception as e:
+            print(f"[ERROR] 恢复音频设备失败: {e}")
 
     def _initialize_funasr_models(self):
         """初始化FunASR模型并显示进度"""

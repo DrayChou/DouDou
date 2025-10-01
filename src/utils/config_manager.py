@@ -24,6 +24,8 @@ class ConfigManager:
         "use_vad": True,
         "use_punc": True,
         "enable_ai_optimization": True,
+        "last_audio_device_index": None,  # 上次选择的音频设备索引
+        "last_audio_device_name": None,   # 上次选择的音频设备名称（用于验证）
     }
 
     def __init__(self, config_file: Optional[str] = None):
