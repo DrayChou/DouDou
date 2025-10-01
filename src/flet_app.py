@@ -225,7 +225,7 @@ class QuQuFletApp:
 
         # 设备状态显示
         self.device_status_text = ft.Text(
-            "音频设备: 默认设备",
+            "音频设备: 默认设备 | 计算设备: 检测中...",
             size=12,
             color=ft.Colors.GREY_600,
             italic=True,
@@ -478,11 +478,14 @@ class QuQuFletApp:
             else:
                 device_name = self.audio_recorder.get_device_name(device_index)
 
-            self.device_status_text.value = f"音频设备: {device_name}"
+            # 保留计算设备信息
+            compute_device = self.device_status_text.value.split("|")[1].strip() if "|" in self.device_status_text.value else "计算设备: 检测中..."
+            self.device_status_text.value = f"音频设备: {device_name} | {compute_device}"
             self.page.update()
         except Exception as e:
             print(f"[DEBUG] 更新设备状态失败: {e}")
-            self.device_status_text.value = "音频设备: 未知设备"
+            compute_device = self.device_status_text.value.split("|")[1].strip() if "|" in self.device_status_text.value else "计算设备: 检测中..."
+            self.device_status_text.value = f"音频设备: 未知设备 | {compute_device}"
             self.page.update()
 
     def _update_record_button_state(self):
@@ -819,11 +822,21 @@ class QuQuFletApp:
                 # 初始化模型
                 init_result = self.recognition_pipeline.direct_funasr.initialize()
 
-                # 更新状态
+                # 更新状态和设备信息
                 if init_result.get("success"):
+                    device_name = init_result.get("device", "unknown")
+                    device_display = self._format_device_name(device_name)
+
                     self.update_status(init_result.get("message", "模型加载成功"))
+
+                    # 更新设备显示
+                    audio_device = self.device_status_text.value.split("|")[0].strip() if "|" in self.device_status_text.value else "音频设备: 默认设备"
+                    self.device_status_text.value = f"{audio_device} | 计算设备: {device_display}"
+                    self.device_status_text.update()
                 else:
                     self.update_status(f"模型加载失败: {init_result.get('error', '未知错误')}")
+                    self.device_status_text.value = self.device_status_text.value.replace("检测中...", "未知")
+                    self.device_status_text.update()
 
             except Exception as e:
                 self.update_status(f"模型加载异常: {str(e)}")
@@ -831,6 +844,27 @@ class QuQuFletApp:
         # 启动加载线程
         thread = threading.Thread(target=init_worker, daemon=True)
         thread.start()
+
+    def _format_device_name(self, device: str) -> str:
+        """
+        格式化设备名称为友好显示
+
+        Args:
+            device: 设备名称 (cuda:0, mps, xpu, cpu)
+
+        Returns:
+            str: 友好显示的设备名称
+        """
+        if device.startswith("cuda"):
+            return "🚀 GPU (CUDA)"
+        elif device == "mps":
+            return "🍎 Apple Silicon (MPS)"
+        elif device == "xpu":
+            return "⚡ Intel GPU (XPU)"
+        elif device == "cpu":
+            return "💻 CPU"
+        else:
+            return device
 
     # 对话框
     def open_settings(self, e=None):

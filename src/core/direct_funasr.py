@@ -26,6 +26,48 @@ class DirectFunASR:
         self.punc_model = None
         self.initialized = False
         self.transcription_count = 0
+        self.device = self._detect_device()
+        logger.info(f"设备检测完成: {self.device}")
+
+    def _detect_device(self) -> str:
+        """
+        自动检测最佳可用设备
+
+        优先级: CUDA GPU > MPS (Apple Silicon) > XPU (Intel GPU) > CPU
+
+        Returns:
+            str: 设备名称 ("cuda:0", "mps", "xpu", "cpu")
+        """
+        try:
+            import torch
+
+            # 1. 检测NVIDIA CUDA GPU
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+                logger.info(f"检测到CUDA GPU: {gpu_name}, 显存: {gpu_memory:.2f}GB")
+                return "cuda:0"
+
+            # 2. 检测Apple Silicon MPS
+            if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                logger.info("检测到Apple Silicon MPS加速")
+                return "mps"
+
+            # 3. 检测Intel XPU
+            if hasattr(torch, 'xpu') and torch.xpu.is_available():
+                logger.info("检测到Intel XPU加速")
+                return "xpu"
+
+            # 4. 降级到CPU
+            logger.info("未检测到GPU，使用CPU模式")
+            return "cpu"
+
+        except ImportError:
+            logger.warning("PyTorch未安装，无法检测设备，默认使用CPU")
+            return "cpu"
+        except Exception as e:
+            logger.warning(f"设备检测失败: {e}，默认使用CPU")
+            return "cpu"
 
     def initialize(self) -> Dict[str, Any]:
         """初始化FunASR模型"""
@@ -39,40 +81,41 @@ class DirectFunASR:
             # 导入FunASR
             from funasr import AutoModel
 
-            # 加载ASR模型
-            logger.info("加载ASR模型...")
+            # 加载ASR模型（使用自动检测的设备）
+            logger.info(f"加载ASR模型到 {self.device}...")
             self.asr_model = AutoModel(
                 model="damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
                 model_revision="v2.0.4",
                 disable_update=True,
-                device="cpu",
+                device=self.device,
             )
 
-            # 加载VAD模型
-            logger.info("加载VAD模型...")
+            # 加载VAD模型（使用自动检测的设备）
+            logger.info(f"加载VAD模型到 {self.device}...")
             self.vad_model = AutoModel(
                 model="damo/speech_fsmn_vad_zh-cn-16k-common-pytorch",
                 model_revision="v2.0.4",
                 disable_update=True,
-                device="cpu",
+                device=self.device,
             )
 
-            # 加载标点模型
-            logger.info("加载标点恢复模型...")
+            # 加载标点模型（使用自动检测的设备）
+            logger.info(f"加载标点恢复模型到 {self.device}...")
             self.punc_model = AutoModel(
                 model="damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
                 model_revision="v2.0.4",
                 disable_update=True,
-                device="cpu",
+                device=self.device,
             )
 
             total_time = time.time() - start_time
             self.initialized = True
-            logger.info(f"FunASR模型初始化完成，耗时: {total_time:.2f}秒")
+            logger.info(f"FunASR模型初始化完成，耗时: {total_time:.2f}秒，设备: {self.device}")
 
             return {
                 "success": True,
-                "message": f"FunASR模型初始化成功，耗时: {total_time:.2f}秒"
+                "message": f"FunASR模型初始化成功，耗时: {total_time:.2f}秒，设备: {self.device}",
+                "device": self.device
             }
 
         except ImportError as e:
@@ -212,6 +255,7 @@ class DirectFunASR:
                 "success": True,
                 "installed": True,
                 "initialized": self.initialized,
+                "device": self.device,
                 "version": getattr(funasr, "__version__", "unknown"),
                 "models": {
                     "asr": self.asr_model is not None,
@@ -224,6 +268,7 @@ class DirectFunASR:
                 "success": False,
                 "installed": False,
                 "initialized": False,
+                "device": "unknown",
                 "error": "FunASR未安装",
             }
 
