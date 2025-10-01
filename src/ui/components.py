@@ -356,7 +356,7 @@ class ResultCard:
 class ActionButtons:
     """操作按钮组"""
 
-    def __init__(self, on_copy: Callable, on_export: Callable, on_clear: Callable, on_settings: Callable):
+    def __init__(self, on_copy: Callable, on_export: Callable, on_clear: Callable, on_optimize: Callable):
         """
         初始化操作按钮组
 
@@ -364,7 +364,7 @@ class ActionButtons:
             on_copy: 复制按钮回调
             on_export: 导出按钮回调
             on_clear: 清空按钮回调
-            on_settings: 设置按钮回调
+            on_optimize: AI优化按钮回调
         """
         self.copy_button = ft.ElevatedButton(
             text="复制",
@@ -396,17 +396,18 @@ class ActionButtons:
             style=ft.ButtonStyle(text_style=ft.TextStyle(size=12)),
         )
 
-        self.settings_button = ft.ElevatedButton(
-            text="设置",
-            icon=ft.Icons.SETTINGS,
-            on_click=on_settings,
-            width=75,
+        self.optimize_button = ft.ElevatedButton(
+            text="AI优化",
+            icon=ft.Icons.AUTO_AWESOME,
+            on_click=on_optimize,
+            disabled=True,
+            width=85,
             height=30,
             style=ft.ButtonStyle(text_style=ft.TextStyle(size=12)),
         )
 
         self.row = ft.Row(
-            [self.copy_button, self.export_button, self.clear_button, self.settings_button],
+            [self.copy_button, self.export_button, self.clear_button, self.optimize_button],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=6,
         )
@@ -416,6 +417,7 @@ class ActionButtons:
         self.copy_button.disabled = not enabled
         self.export_button.disabled = not enabled
         self.clear_button.disabled = not enabled
+        self.optimize_button.disabled = not enabled
 
     def get_control(self) -> ft.Control:
         """获取Flet控件"""

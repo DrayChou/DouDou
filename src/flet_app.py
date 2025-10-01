@@ -220,7 +220,7 @@ class QuQuFletApp:
             on_copy=self.copy_result,
             on_export=self.export_result,
             on_clear=self.clear_result,
-            on_settings=self.open_settings
+            on_optimize=self.optimize_text
         )
 
         # 设备状态显示

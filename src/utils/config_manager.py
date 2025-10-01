@@ -34,8 +34,22 @@ class ConfigManager:
             config_file: 配置文件路径，如果为None则使用默认路径
         """
         if config_file is None:
-            # 使用当前工作目录的配置文件
-            self.config_file = os.path.join(os.getcwd(), "doudou_settings.json")
+            # 尝试多个可能的配置文件位置
+            possible_paths = [
+                os.path.join(os.getcwd(), "doudou_settings.json"),  # 当前目录
+                os.path.join(os.getcwd(), "docs", "config", "doudou_settings.json"),  # docs/config
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), "doudou_settings.json"),  # 项目根目录
+            ]
+
+            # 使用第一个存在的文件，或者默认使用当前目录
+            self.config_file = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    self.config_file = path
+                    break
+
+            if self.config_file is None:
+                self.config_file = possible_paths[0]  # 默认使用当前目录
         else:
             self.config_file = config_file
 
