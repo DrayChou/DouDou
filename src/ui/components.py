@@ -324,6 +324,25 @@ class ResultCard:
                     results.append(text_control.value)
         return list(reversed(results))  # 返回正序（旧→新）
 
+    def get_all_results_with_timestamps(self) -> list:
+        """获取所有结果（包含时间戳）"""
+        results = []
+        for control in self.results_list.controls:
+            if isinstance(control.content, ft.Column) and len(control.content.controls) >= 2:
+                # 获取时间戳
+                timestamp_row = control.content.controls[0]
+                timestamp = ""
+                if isinstance(timestamp_row, ft.Row) and len(timestamp_row.controls) > 0:
+                    timestamp_control = timestamp_row.controls[0]
+                    if isinstance(timestamp_control, ft.Text):
+                        timestamp = timestamp_control.value or ""
+
+                # 获取文本
+                text_control = control.content.controls[-1]
+                if isinstance(text_control, ft.Text) and text_control.value:
+                    results.append({"timestamp": timestamp, "text": text_control.value})
+        return results
+
     def clear_result(self):
         """清空结果"""
         self.results_list.controls.clear()
@@ -337,12 +356,13 @@ class ResultCard:
 class ActionButtons:
     """操作按钮组"""
 
-    def __init__(self, on_copy: Callable, on_clear: Callable, on_settings: Callable):
+    def __init__(self, on_copy: Callable, on_export: Callable, on_clear: Callable, on_settings: Callable):
         """
         初始化操作按钮组
 
         Args:
             on_copy: 复制按钮回调
+            on_export: 导出按钮回调
             on_clear: 清空按钮回调
             on_settings: 设置按钮回调
         """
@@ -350,6 +370,16 @@ class ActionButtons:
             text="复制",
             icon=ft.Icons.COPY,
             on_click=on_copy,
+            disabled=True,
+            width=75,
+            height=30,
+            style=ft.ButtonStyle(text_style=ft.TextStyle(size=12)),
+        )
+
+        self.export_button = ft.ElevatedButton(
+            text="导出",
+            icon=ft.Icons.SAVE_ALT,
+            on_click=on_export,
             disabled=True,
             width=75,
             height=30,
@@ -376,7 +406,7 @@ class ActionButtons:
         )
 
         self.row = ft.Row(
-            [self.copy_button, self.clear_button, self.settings_button],
+            [self.copy_button, self.export_button, self.clear_button, self.settings_button],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=6,
         )
@@ -384,6 +414,7 @@ class ActionButtons:
     def enable_result_buttons(self, enabled: bool):
         """启用/禁用结果相关按钮"""
         self.copy_button.disabled = not enabled
+        self.export_button.disabled = not enabled
         self.clear_button.disabled = not enabled
 
     def get_control(self) -> ft.Control:

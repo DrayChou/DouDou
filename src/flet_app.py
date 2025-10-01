@@ -33,6 +33,7 @@ from ui.components import (
     ResultCard,
     AudioDeviceSelector,
     RealtimeModeToggle,
+    ActionButtons,
 )
 from ui.task_monitor import TaskMonitor
 
@@ -214,6 +215,14 @@ class QuQuFletApp:
         # 结果显示区域
         self.result_card = ResultCard()
 
+        # 操作按钮组
+        self.action_buttons = ActionButtons(
+            on_copy=self.copy_result,
+            on_export=self.export_result,
+            on_clear=self.clear_result,
+            on_settings=self.open_settings
+        )
+
         # 设备状态显示
         self.device_status_text = ft.Text(
             "音频设备: 默认设备",
@@ -305,6 +314,11 @@ class QuQuFletApp:
                 ft.Container(
                     expand=True,
                     content=self.result_card.card
+                ),
+                # 操作按钮区域
+                ft.Container(
+                    content=self.action_buttons.get_control(),
+                    padding=ft.padding.only(top=10),
                 ),
             ]),
         )
@@ -514,6 +528,10 @@ class QuQuFletApp:
             self.result_card.add_result(text, ft.Colors.BLUE)
             self.update_status(f"识别完成: {text[:20]}...")
 
+            # 启用操作按钮
+            self.action_buttons.enable_result_buttons(True)
+            self.action_buttons.row.update()
+
             # 提交UI更新
             self.task_manager._submit_ui_update({
                 'type': 'recognition_complete',
@@ -563,10 +581,83 @@ class QuQuFletApp:
                 context_history = all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
                 self.transcription_handler.optimize_text_async(text, context_history)
 
+    def copy_result(self, e=None):
+        """复制最新识别结果"""
+        text = self.result_card.get_result()
+        if text:
+            self.page.set_clipboard(text)
+            self.update_status("✓ 已复制到剪贴板")
+            # 简短的按钮反馈
+            original_text = self.action_buttons.copy_button.text
+            self.action_buttons.copy_button.text = "✓ 已复制"
+            self.action_buttons.copy_button.update()
+
+            # 1秒后恢复按钮文本
+            import threading
+            def restore_button():
+                import time
+                time.sleep(1)
+                self.action_buttons.copy_button.text = original_text
+                if self.action_buttons.copy_button.page:
+                    self.action_buttons.copy_button.update()
+            threading.Thread(target=restore_button, daemon=True).start()
+
+    def export_result(self, e=None):
+        """导出识别结果为TXT文件"""
+        results = self.result_card.get_all_results_with_timestamps()
+        if not results:
+            self.update_status("没有可导出的内容")
+            return
+
+        try:
+            from datetime import datetime
+            import os
+
+            # 生成文件名（使用当前时间）
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"识别结果_{timestamp}.txt"
+
+            # 保存到当前目录
+            filepath = os.path.join(os.getcwd(), filename)
+
+            # 写入文件
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("=" * 50 + "\n")
+                f.write(f"语音识别结果导出\n")
+                f.write(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"共 {len(results)} 条记录\n")
+                f.write("=" * 50 + "\n\n")
+
+                for i, item in enumerate(results, 1):
+                    f.write(f"[{i}] {item['timestamp']}\n")
+                    f.write(f"{item['text']}\n\n")
+
+            self.update_status(f"✓ 已导出到: {filename}")
+
+            # 按钮反馈
+            original_text = self.action_buttons.export_button.text
+            self.action_buttons.export_button.text = "✓ 已导出"
+            self.action_buttons.export_button.update()
+
+            import threading
+            def restore_button():
+                import time
+                time.sleep(1)
+                self.action_buttons.export_button.text = original_text
+                if self.action_buttons.export_button.page:
+                    self.action_buttons.export_button.update()
+            threading.Thread(target=restore_button, daemon=True).start()
+
+        except Exception as ex:
+            self.update_status(f"导出失败: {str(ex)}")
+
     def clear_result(self, e=None):
         """清空结果"""
         self.result_card.clear_result()
         self.transcription_handler.clear_result()
+        # 禁用按钮
+        self.action_buttons.enable_result_buttons(False)
+        self.action_buttons.row.update()
 
     def get_context_history(self) -> list:
         """获取识别结果的上下文历史（最近3条，不包括当前最新的）"""
