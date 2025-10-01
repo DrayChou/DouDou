@@ -81,6 +81,10 @@ tmp/
 temp/
 *.tmp
 *.temp
+nul
+
+# User-generated export files
+识别结果_*.txt
 
 # Build tools
 .gyp

@@ -619,8 +619,14 @@ class QuQuFletApp:
         def summarize_worker():
             try:
                 print("[DEBUG] 调用 AI summarize_text")
+                print(f"[DEBUG] texts参数: {texts[:2] if len(texts) > 2 else texts}")
                 result = self.ai_processor.summarize_text(texts)
-                print(f"[DEBUG] AI返回结果: success={result.get('success')}, error={result.get('error')}")
+                print(f"[DEBUG] AI返回结果: {result}")
+
+                if not result:
+                    print("[ERROR] AI返回None")
+                    self.update_status("AI返回空结果")
+                    return
 
                 if result.get("success"):
                     summary_text = result.get("text", "")
@@ -664,6 +670,9 @@ class QuQuFletApp:
                     self.update_status(f"汇总失败: {error_msg}")
 
             except Exception as ex:
+                print(f"[ERROR] 汇总异常: {ex}")
+                import traceback
+                print(f"[ERROR] 异常堆栈:\n{traceback.format_exc()}")
                 self.update_status(f"汇总异常: {str(ex)}")
 
         threading.Thread(target=summarize_worker, daemon=True).start()

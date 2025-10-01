@@ -118,7 +118,7 @@ class AIProcessor:
                     }
                 ],
                 "temperature": 0.3,
-                "max_tokens": 2000
+                "max_tokens": 4096  # 增加token限制，支持更长的汇总报告
             }
 
             # 确保base_url格式正确
@@ -129,30 +129,42 @@ class AIProcessor:
                 api_url += 'chat/completions'
 
             print(f"[AIProcessor] 调用AI API: {api_url}")
+            print(f"[AIProcessor] 请求数据: model={self.model_name}, max_tokens={data['max_tokens']}, prompt_length={len(prompt)}")
 
-            # 发送请求
+            # 发送请求，增加超时时间
             response = requests.post(
                 api_url,
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=120  # 增加超时到120秒，汇总需要更长时间
             )
+
+            print(f"[AIProcessor] 响应状态码: {response.status_code}")
 
             if response.status_code == 200:
                 result = response.json()
                 if 'choices' in result and len(result['choices']) > 0:
                     optimized_text = result['choices'][0]['message']['content'].strip()
-                    print(f"[AIProcessor] AI优化成功")
+                    finish_reason = result['choices'][0].get('finish_reason', 'unknown')
+                    print(f"[AIProcessor] AI调用成功, finish_reason={finish_reason}, 返回长度={len(optimized_text)}")
+
+                    # 检查是否因为长度限制被截断
+                    if finish_reason == 'length':
+                        print(f"[WARN] AI响应被截断！需要增加 max_tokens 或减少输入")
+
                     return optimized_text
                 else:
                     print(f"[AIProcessor] AI API响应格式错误: {result}")
                     return None
             else:
-                print(f"[AIProcessor] AI API请求失败: {response.status_code}, {response.text}")
+                print(f"[AIProcessor] AI API请求失败: {response.status_code}")
+                print(f"[AIProcessor] 错误详情: {response.text[:500]}")  # 只打印前500字符
                 return None
 
         except Exception as e:
             print(f"[AIProcessor] AI API调用异常: {e}")
+            import traceback
+            print(f"[AIProcessor] 异常堆栈: {traceback.format_exc()}")
             return None
 
     def summarize_text(self, text_list: list) -> Dict[str, Any]:
