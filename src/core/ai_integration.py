@@ -155,6 +155,74 @@ class AIProcessor:
             print(f"[AIProcessor] AI API调用异常: {e}")
             return None
 
+    def summarize_text(self, text_list: list) -> Dict[str, Any]:
+        """
+        汇总多段文本生成报告
+
+        Args:
+            text_list: 文本列表（识别结果）
+
+        Returns:
+            Dict: 汇总结果
+        """
+        try:
+            # 检查配置
+            if not all([self.api_key, self.base_url, self.model_name]):
+                return {
+                    "success": False,
+                    "error": "AI配置不完整，请在设置中配置API Key、Base URL和模型名称"
+                }
+
+            if not text_list:
+                return {
+                    "success": False,
+                    "error": "没有可汇总的内容"
+                }
+
+            # 合并所有文本
+            combined_text = "\n".join([f"{i+1}. {text}" for i, text in enumerate(text_list)])
+
+            # 构建汇总提示词
+            summary_prompt = f"""请对以下语音识别记录进行汇总分析，生成一份结构化的报告。
+
+识别记录（共{len(text_list)}条）：
+{combined_text}
+
+汇总要求：
+1. 提取核心主题和关键要点
+2. 按逻辑顺序组织内容
+3. 总结主要观点和结论
+4. 标注重要信息和决策点
+5. 使用Markdown格式输出
+6. 包含以下部分：
+   - 📋 会话概要（2-3句话）
+   - 🎯 关键要点（3-5个要点）
+   - 💡 核心内容（详细展开）
+   - ✅ 总结与建议
+
+请直接返回汇总报告，使用清晰的Markdown格式："""
+
+            # 调用AI API
+            summary_text = self._call_api(summary_prompt)
+
+            if summary_text:
+                return {
+                    "success": True,
+                    "text": summary_text.strip(),
+                    "record_count": len(text_list)
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "AI返回空结果"
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     def translate_text(self, text: str, target_language: str = "en") -> Dict[str, Any]:
         """
         翻译文本（预留功能）

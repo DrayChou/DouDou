@@ -248,7 +248,7 @@ class ResultCard:
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
 
-    def add_result(self, text: str, color: Optional[str] = None):
+    def add_result(self, text: str, color: Optional[str] = None, is_summary: bool = False):
         """添加新的识别结果"""
         # 如果是第一个结果，清除空状态
         if len(self.results_list.controls) == 1 and hasattr(self.results_list.controls[0].content, 'value') and self.results_list.controls[0].content.value == "点击录音按钮开始...":
@@ -256,33 +256,69 @@ class ResultCard:
 
         timestamp = self._get_timestamp()
 
-        # 创建结果容器
-        result_container = ft.Container(
-            content=ft.Column([
-                ft.Row([
+        # 根据是否为汇总结果使用不同样式
+        if is_summary:
+            # 汇总报告样式 - 特殊标识
+            result_container = ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.SUMMARIZE, size=16, color=ft.Colors.PURPLE_500),
+                        ft.Text(
+                            "AI汇总报告",
+                            size=12,
+                            color=ft.Colors.PURPLE_700,
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Container(expand=True),
+                        ft.Text(
+                            timestamp,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                        ),
+                    ], alignment=ft.MainAxisAlignment.START),
+                    ft.Container(height=8),
                     ft.Text(
-                        timestamp,
-                        size=11,
-                        color=ft.Colors.GREY_500,
-                        weight=ft.FontWeight.BOLD,
+                        text,
+                        size=13,
+                        color=ft.Colors.BLACK87,
+                        selectable=True,
+                        width=None,
                     ),
-                    ft.Container(expand=True),
-                ], alignment=ft.MainAxisAlignment.START),
-                ft.Container(height=4),
-                ft.Text(
-                    text,
-                    size=13,
-                    color=color or ft.Colors.BLACK87,
-                    selectable=True,
-                    width=None,  # 文本宽度自适应
-                ),
-            ]),
-            padding=ft.padding.all(12),
-            bgcolor=ft.Colors.GREY_50,
-            border_radius=8,
-            border=ft.border.all(1, ft.Colors.GREY_200),
-            width=None,  # 容器宽度自适应
-        )
+                ]),
+                padding=ft.padding.all(16),
+                bgcolor=ft.Colors.PURPLE_50,  # 特殊背景色
+                border_radius=10,
+                border=ft.border.all(2, ft.Colors.PURPLE_300),  # 特殊边框
+                width=None,
+            )
+        else:
+            # 普通识别结果样式
+            result_container = ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Text(
+                            timestamp,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Container(expand=True),
+                    ], alignment=ft.MainAxisAlignment.START),
+                    ft.Container(height=4),
+                    ft.Text(
+                        text,
+                        size=13,
+                        color=color or ft.Colors.BLACK87,
+                        selectable=True,
+                        width=None,
+                    ),
+                ]),
+                padding=ft.padding.all(12),
+                bgcolor=ft.Colors.GREY_50,
+                border_radius=8,
+                border=ft.border.all(1, ft.Colors.GREY_200),
+                width=None,
+            )
 
         self.results_list.controls.append(result_container)
 
@@ -343,6 +379,21 @@ class ResultCard:
                     results.append({"timestamp": timestamp, "text": text_control.value})
         return results
 
+    def get_all_recognition_texts(self) -> list:
+        """获取所有识别文本（排除汇总报告，仅用于汇总）"""
+        texts = []
+        for control in self.results_list.controls:
+            # 跳过汇总报告（紫色背景）
+            if hasattr(control, 'bgcolor') and control.bgcolor == ft.Colors.PURPLE_50:
+                continue
+
+            if isinstance(control.content, ft.Column) and len(control.content.controls) >= 2:
+                # 获取文本
+                text_control = control.content.controls[-1]
+                if isinstance(text_control, ft.Text) and text_control.value:
+                    texts.append(text_control.value)
+        return texts
+
     def clear_result(self):
         """清空结果"""
         self.results_list.controls.clear()
@@ -397,8 +448,8 @@ class ActionButtons:
         )
 
         self.optimize_button = ft.ElevatedButton(
-            text="AI优化",
-            icon=ft.Icons.AUTO_AWESOME,
+            text="AI汇总",
+            icon=ft.Icons.SUMMARIZE,
             on_click=on_optimize,
             disabled=True,
             width=85,

@@ -220,7 +220,7 @@ class QuQuFletApp:
             on_copy=self.copy_result,
             on_export=self.export_result,
             on_clear=self.clear_result,
-            on_optimize=self.optimize_text
+            on_optimize=self.summarize_results
         )
 
         # 设备状态显示
@@ -580,6 +580,72 @@ class QuQuFletApp:
                 all_recent = self.result_card.get_recent_results(4)  # 获取最近4条
                 context_history = all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
                 self.transcription_handler.optimize_text_async(text, context_history)
+
+    def summarize_results(self, e=None):
+        """AI汇总所有识别结果"""
+        if not self.ai_processor:
+            self.update_status("请先在设置中配置AI服务")
+            return
+
+        # 获取所有识别文本（排除汇总报告）
+        texts = self.result_card.get_all_recognition_texts()
+        if not texts:
+            self.update_status("没有可汇总的识别记录")
+            return
+
+        self.update_status(f"正在汇总 {len(texts)} 条识别记录...")
+
+        # 异步执行汇总
+        import threading
+        def summarize_worker():
+            try:
+                result = self.ai_processor.summarize_text(texts)
+
+                if result.get("success"):
+                    summary_text = result.get("text", "")
+                    record_count = result.get("record_count", len(texts))
+
+                    # 保存到本地文件
+                    from datetime import datetime
+                    import os
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"AI汇总报告_{timestamp}.md"
+                    filepath = os.path.join(os.getcwd(), filename)
+
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(f"# AI汇总报告\n\n")
+                        f.write(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        f.write(f"**记录数量**: {record_count} 条\n\n")
+                        f.write("---\n\n")
+                        f.write(summary_text)
+
+                    # 添加到识别结果（特殊样式）
+                    self.result_card.add_result(summary_text, is_summary=True)
+                    self.result_card.card.update()
+
+                    self.update_status(f"✓ 汇总完成，已保存到: {filename}")
+
+                    # 按钮反馈
+                    original_text = self.action_buttons.optimize_button.text
+                    self.action_buttons.optimize_button.text = "✓ 已汇总"
+                    self.action_buttons.optimize_button.update()
+
+                    def restore_button():
+                        import time
+                        time.sleep(1.5)
+                        self.action_buttons.optimize_button.text = original_text
+                        if self.action_buttons.optimize_button.page:
+                            self.action_buttons.optimize_button.update()
+                    threading.Thread(target=restore_button, daemon=True).start()
+
+                else:
+                    error_msg = result.get("error", "汇总失败")
+                    self.update_status(f"汇总失败: {error_msg}")
+
+            except Exception as ex:
+                self.update_status(f"汇总异常: {str(ex)}")
+
+        threading.Thread(target=summarize_worker, daemon=True).start()
 
     def copy_result(self, e=None):
         """复制最新识别结果"""
