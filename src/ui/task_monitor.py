@@ -251,6 +251,10 @@ class TaskMonitor:
         seconds = uptime_seconds % 60
         self.uptime_text.value = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+        # 刷新UI
+        if self.status_container and self.status_container.page:
+            self.status_container.update()
+
     def _update_progress_ring(self, progress_ring: ft.ProgressRing, current: int, total: int):
         """更新进度环"""
         if total > 0:

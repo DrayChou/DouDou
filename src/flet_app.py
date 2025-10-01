@@ -115,6 +115,10 @@ class QuQuFletApp:
         # 识别流水线 - 使用直接集成模式
         self.recognition_pipeline = RecognitionPipeline(use_direct_integration=True)
 
+        # 预加载FunASR模型（启动时初始化一次，后续复用）
+        if self.recognition_pipeline.use_direct_integration and self.recognition_pipeline.direct_funasr:
+            self._initialize_funasr_models()
+
         # AI处理器
         self.ai_processor = None
         if self.settings.get("enable_ai_optimization", False):
@@ -568,6 +572,32 @@ class QuQuFletApp:
         """获取识别结果的上下文历史（最近3条，不包括当前最新的）"""
         all_recent = self.result_card.get_recent_results(4)  # 获取最近4条
         return all_recent[:-1] if len(all_recent) > 1 else []  # 排除最后一条（当前文本）
+
+    def _initialize_funasr_models(self):
+        """初始化FunASR模型并显示进度"""
+        import threading
+
+        def init_worker():
+            try:
+                # 在状态栏显示加载提示
+                self.update_status("正在加载语音识别模型...")
+                self.page.update()
+
+                # 初始化模型
+                init_result = self.recognition_pipeline.direct_funasr.initialize()
+
+                # 更新状态
+                if init_result.get("success"):
+                    self.update_status(init_result.get("message", "模型加载成功"))
+                else:
+                    self.update_status(f"模型加载失败: {init_result.get('error', '未知错误')}")
+
+            except Exception as e:
+                self.update_status(f"模型加载异常: {str(e)}")
+
+        # 启动加载线程
+        thread = threading.Thread(target=init_worker, daemon=True)
+        thread.start()
 
     # 对话框
     def open_settings(self, e=None):
