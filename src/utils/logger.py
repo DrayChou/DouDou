@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import uuid
 
 
 class Logger:
@@ -37,9 +38,13 @@ class Logger:
         self.logs_dir = Path("logs")
         self.logs_dir.mkdir(exist_ok=True)
 
-        # 创建日志文件名（按日期）
+        # 生成每次启动的唯一标识
         today = datetime.now().strftime("%Y-%m-%d")
-        self.log_file = self.logs_dir / f"ququ_{today}.log"
+        time_str = datetime.now().strftime("%H-%M-%S")
+        session_id = str(uuid.uuid4())[:8]  # 取UUID前8位作为会话标识
+
+        # 创建日志文件名（每次启动独立文件）
+        self.log_file = self.logs_dir / f"doudou_{today}_{time_str}_{session_id}.log"
 
         # 配置根日志器
         self.root_logger = logging.getLogger()
@@ -72,7 +77,7 @@ class Logger:
         self.root_logger.addHandler(file_handler)
 
         # 错误日志文件（仅记录ERROR及以上级别）
-        self.error_log_file = self.logs_dir / f"ququ_error_{today}.log"
+        self.error_log_file = self.logs_dir / f"doudou_error_{today}_{time_str}_{session_id}.log"
         error_handler = logging.handlers.RotatingFileHandler(
             self.error_log_file,
             maxBytes=5*1024*1024,  # 5MB
@@ -84,7 +89,7 @@ class Logger:
         self.root_logger.addHandler(error_handler)
 
         # 记录日志系统启动
-        self.info("日志系统已启动", extra={"context": "system"})
+        self.info(f"日志系统已启动 - 会话ID: {session_id}", extra={"context": "system"})
 
     def debug(self, message: str, **kwargs):
         """调试日志"""
@@ -145,6 +150,15 @@ class Logger:
                 return ''.join(recent_lines)
         except Exception as e:
             return f"读取日志失败: {str(e)}"
+
+    def get_current_log_files(self) -> dict:
+        """获取当前会话的日志文件信息"""
+        return {
+            "main_log": str(self.log_file),
+            "error_log": str(self.error_log_file),
+            "session_id": self.log_file.stem.split('_')[-1],  # 从文件名提取会话ID
+            "start_time": self.log_file.stem.split('_')[1:4]  # 从文件名提取时间
+        }
 
     def clear_old_logs(self, days: int = 7):
         """清理旧日志文件"""
