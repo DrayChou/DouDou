@@ -129,7 +129,9 @@ class ResultCard:
 
         ctrls = record.to_controls()
         record.controls = ctrls
+        # 为控件添加data属性以便后续识别
         for c in ctrls:
+            c.data = record.record_id
             self.results_list.controls.insert(0, c)
 
         if self.results_list.page:
@@ -229,6 +231,59 @@ class ResultCard:
 
     def get_all_recognition_texts(self) -> list:
         return [r.original_text for r in self.records]
+
+    def update_latest_correction(self, corrected_text: str) -> bool:
+        """更新最近一条记录的修正文本"""
+        if not self.records:
+            return False
+
+        latest_record = self.records[-1]
+        latest_record.add_correction(corrected_text)
+
+        # 更新UI显示
+        self._refresh_record_display(latest_record)
+        return True
+
+    def update_latest_translation(self, translated_text: str) -> bool:
+        """更新最近一条记录的翻译文本"""
+        if not self.records:
+            return False
+
+        latest_record = self.records[-1]
+        latest_record.add_translation(translated_text)
+
+        # 更新UI显示
+        self._refresh_record_display(latest_record)
+        return True
+
+    def _refresh_record_display(self, record: 'ResultRecord'):
+        """刷新指定记录的UI显示"""
+        # 找到对应的UI控件组并更新
+        new_controls = record.to_controls()
+
+        # 找到第一个匹配的控件索引
+        start_index = None
+        for i, control in enumerate(self.results_list.controls):
+            if hasattr(control, 'data') and control.data == record.record_id:
+                start_index = i
+                break
+
+        if start_index is not None:
+            # 移除旧的控件组
+            old_count = len(record.controls) if record.controls else 1
+            for _ in range(old_count):
+                if start_index < len(self.results_list.controls):
+                    self.results_list.controls.pop(start_index)
+
+            # 插入新的控件组
+            for new_control in new_controls:
+                new_control.data = record.record_id
+                self.results_list.controls.insert(start_index, new_control)
+                start_index += 1
+
+            # 更新记录的控件引用
+            record.controls = new_controls
+            self.results_list.update()
 
     def clear_result(self):
         self.results_list.controls.clear()

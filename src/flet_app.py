@@ -168,10 +168,14 @@ class QuQuFletApp:
         # AI处理器
         self.ai_processor = None
         if self.settings.get("enable_ai_optimization", False):
+            # 从ai_services.default中读取AI配置
+            ai_services = self.settings.get("ai_services", {})
+            default_config = ai_services.get("default", {})
+
             self.ai_processor = AIProcessor(
-                api_key=self.settings.get("api_key", ""),
-                base_url=self.settings.get("base_url", ""),
-                model_name=self.settings.get("model_name", "")
+                api_key=default_config.get("api_key", ""),
+                base_url=default_config.get("base_url", ""),
+                model_name=default_config.get("model_name", "")
             )
 
         # 转写处理器
@@ -188,9 +192,9 @@ class QuQuFletApp:
         # 使用新的统一任务系统
         funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
         from core.task_adapter import create_task_manager
-        # 使用新的统一任务系统（解决AI任务阻塞问题）
+        # 使用旧任务管理器（实现主线+并行任务池架构）
         self.task_manager = create_task_manager(
-            use_unified_system=True,
+            use_unified_system=False,
             funasr_recognizer=funasr_recognizer,
             config_manager=self.config_manager
         )
@@ -486,13 +490,53 @@ class QuQuFletApp:
         self.update_status("录音完成")
         self.page.update()
 
-        # 开始转写
+        # 开始转写（使用统一任务系统）
         if audio_file:
             print(f"[DEBUG] 开始转写音频文件: {audio_file}")
-            self.transcription_handler.transcribe_audio_file(
-                audio_file,
-                enable_ai_optimization=self.settings.get("enable_ai_optimization", False)
-            )
+            # 先添加一个占位符识别结果来获取record_id
+            record_id = self.result_card.add_recognition_result("正在识别...")
+
+            # 使用旧TaskManager提交识别任务
+            if hasattr(self.task_manager, 'submit_recognition_task'):
+                from core.task_manager import RecognitionTask, TaskPriority
+
+                # 获取音频时长
+                try:
+                    import librosa
+                    duration = librosa.get_duration(filename=audio_file)
+                except:
+                    duration = 0.0
+
+                # 创建音频片段
+                audio_segment = AudioSegment(
+                    file_path=audio_file,
+                    timestamp=time.time(),
+                    duration=duration,
+                    segment_id=f"seg_{int(time.time() * 1000)}",
+                    vad_confidence=0.8,
+                    sample_rate=16000,
+                    channels=1
+                )
+
+                # 创建识别任务
+                recognition_task = RecognitionTask(
+                    audio_segment=audio_segment,
+                    task_id=f"task_{int(time.time() * 1000)}",
+                    created_at=time.time(),
+                    priority=TaskPriority.NORMAL,
+                    record_id=record_id
+                )
+
+                # 提交到旧TaskManager
+                task_id = self.task_manager.submit_recognition_task(recognition_task)
+                print(f"[DEBUG] 已提交识别任务到任务池: {task_id}")
+            else:
+                # 回退到旧的转录处理器
+                print(f"[DEBUG] 回退到旧的转录处理器")
+                self.transcription_handler.transcribe_audio_file(
+                    audio_file,
+                    enable_ai_optimization=self.settings.get("enable_ai_optimization", False)
+                )
         else:
             print(f"[DEBUG] 没有音频文件，跳过转写")
 
@@ -523,7 +567,9 @@ class QuQuFletApp:
         if result.get("success"):
             text = result.get("text", "")
             print(f"[DEBUG] 转写成功，文本: {text[:100]}...")
-            self.result_card.set_text(text)
+            # 添加新的识别记录，包含原文
+            record_id = self.result_card.add_recognition_result(text)
+            print(f"[DEBUG] 添加识别记录，ID: {record_id}")
             self.update_status("转写完成")
         else:
             error = result.get("error", "转写失败")
@@ -533,7 +579,48 @@ class QuQuFletApp:
 
     def on_ai_optimization_complete(self, optimized_text: str):
         """AI优化完成回调"""
-        self.result_card.set_text(optimized_text)
+        # 过滤AI回答中的思考内容
+        filtered_text = self._filter_ai_thinking_content(optimized_text)
+        # 更新最近的识别记录，添加修正文本
+        success = self.result_card.update_latest_correction(filtered_text)
+        if success:
+            print(f"[DEBUG] 更新修正文本成功: {filtered_text[:50]}...")
+        else:
+            print(f"[DEBUG] 没有找到可更新的识别记录，添加为新记录")
+            self.result_card.add_recognition_result(filtered_text)
+        self.page.update()
+
+    # 设备管理
+    def _filter_ai_thinking_content(self, text: str) -> str:
+        """过滤AI回答中的思考内容，去除思考标记和前后空格换行"""
+        import re
+
+        # 去除思考内容标记，如 <think> ... </think> 或类似的思考过程
+        # 支持多种思考标记格式
+        thinking_patterns = [
+            r'<think>.*?</think>',  # <think>...</think>
+            r'<思考>.*?</思考>',    # <思考>...</思考>
+            r'<thinking>.*?</thinking>',  # <thinking>...</thinking>
+            r'<reasoning>.*?</reasoning>', # <reasoning>...</reasoning>
+            r'<analysis>.*?</analysis>',   # <analysis>...</analysis>
+            r'<step>.*?</step>',           # <step>...</step>
+            r'<process>.*?</process>',     # <process>...</process>
+        ]
+
+        filtered_text = text
+        for pattern in thinking_patterns:
+            filtered_text = re.sub(pattern, '', filtered_text, flags=re.DOTALL | re.IGNORECASE)
+
+        # 去除前后多余的空格和换行
+        filtered_text = filtered_text.strip()
+
+        # 去除可能的多余空行
+        filtered_text = re.sub(r'\n\s*\n', '\n', filtered_text)
+
+        # 去除行首行尾空格
+        filtered_text = '\n'.join(line.strip() for line in filtered_text.split('\n'))
+
+        return filtered_text
 
     # 设备管理
     def on_audio_device_change(self, device_index: Optional[int]):
@@ -684,18 +771,23 @@ class QuQuFletApp:
         # 兼容两种字段名：optimized_text（处理器返回）或 corrected_text（统一任务）
         corrected = getattr(task, 'corrected_text', None) or getattr(task, 'optimized_text', None)
         if corrected:
-            print(f"[DEBUG] AI修正完成: {corrected}")
+            # 过滤AI回答中的思考内容
+            filtered_corrected = self._filter_ai_thinking_content(corrected)
+            print(f"[DEBUG] AI修正完成: {filtered_corrected}")
 
             def _ui_add_correction():
                 try:
                     record_id = getattr(task, 'record_id', None)
                     if record_id:
-                        self.result_card.add_correction_result(record_id, corrected)
+                        self.result_card.add_correction_result(record_id, filtered_corrected)
                         logger.info(f"[DEBUG] 修正结果已关联到记录 {record_id}")
                     else:
-                        self.result_card.add_result(f"[修正] {corrected}", ft.Colors.ORANGE_700)
-                        logger.info(f"[DEBUG] 修正结果已单独添加到界面")
-                    self.status_display.update_status(f"AI修正完成: {corrected[:20]}...")
+                        # 如果没有record_id，尝试更新最近的一条记录
+                        success = self.result_card.update_latest_correction(filtered_corrected)
+                        if not success:
+                            self.result_card.add_result(f"[修正] {filtered_corrected}", ft.Colors.ORANGE_700)
+                        logger.info(f"[DEBUG] 修正结果已更新到最近记录")
+                    self.status_display.update_status(f"AI修正完成: {filtered_corrected[:20]}...")
                     if self.page:
                         self.page.update()
                 except Exception as e:
@@ -711,7 +803,9 @@ class QuQuFletApp:
         logger.info(f"[DEBUG] 翻译结果: {getattr(task, 'translated_text', 'N/A')}")
 
         if hasattr(task, 'translated_text') and task.translated_text:
-            print(f"[DEBUG] 翻译完成: {task.translated_text}")
+            # 过滤AI回答中的思考内容
+            filtered_translation = self._filter_ai_thinking_content(task.translated_text)
+            print(f"[DEBUG] 翻译完成: {filtered_translation}")
 
             def _ui_add_translation():
                 try:
@@ -719,14 +813,17 @@ class QuQuFletApp:
                     if record_id:
                         self.result_card.add_translation_result(
                             record_id,
-                            task.translated_text,
+                            filtered_translation,
                             getattr(task, 'target_language', None)
                         )
                         logger.info(f"[DEBUG] 翻译结果已关联到记录 {record_id}")
                     else:
-                        self.result_card.add_result(f"[翻译] {task.translated_text}", ft.Colors.GREEN_700)
-                        logger.info(f"[DEBUG] 翻译结果已单独添加到界面")
-                    self.status_display.update_status(f"翻译完成: {task.translated_text[:20]}...")
+                        # 如果没有record_id，添加到最近的一条记录
+                        success = self.result_card.update_latest_translation(filtered_translation)
+                        if not success:
+                            self.result_card.add_result(f"[翻译] {filtered_translation}", ft.Colors.GREEN_700)
+                        logger.info(f"[DEBUG] 翻译结果已更新到最近记录")
+                    self.status_display.update_status(f"翻译完成: {filtered_translation[:20]}...")
                     if self.page:
                         self.page.update()
                 except Exception as e:
@@ -1080,7 +1177,7 @@ class QuQuFletApp:
         from core.task_adapter import create_task_manager
         funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
         self.task_manager = create_task_manager(
-            use_unified_system=True,
+            use_unified_system=False,
             funasr_recognizer=funasr_recognizer,
             config_manager=self.config_manager
         )
