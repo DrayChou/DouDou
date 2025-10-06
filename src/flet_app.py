@@ -10,6 +10,10 @@ import time
 import flet as ft
 from typing import Optional
 
+# 首先导入并初始化日志系统
+from utils.logger import get_logger
+logger = get_logger()
+
 from core import (
     AudioEngine,
     AudioRecorder,
@@ -25,7 +29,7 @@ from core import (
     AudioSegment,
 )
 from utils.config_manager import ConfigManager
-from ui.dialogs import SettingsDialog, HelpDialog
+from ui.dialogs import create_settings_dialog, HelpDialog
 from ui.components import (
     RecordButton,
     StatusDisplay,
@@ -50,6 +54,51 @@ class QuQuFletApp:
 
         # 设置页面关闭时的清理
         page.on_close = self._on_page_close
+
+        # UI 调度器：确保所有UI更新在主线程执行
+        # 使用 page.invoke_later 将函数投递到UI线程执行
+        # 仅在回调/后台线程中使用，避免线程安全问题
+        
+    def _dispatch_ui(self, fn, *args, **kwargs):
+        """将UI更新安全调度到主线程执行"""
+        try:
+            from functools import partial
+            import threading
+
+            # 检查是否在主线程中（Flet的UI线程）
+            main_thread = getattr(self, '_main_thread', None)
+            if main_thread is None:
+                # 首次调用时记录主线程
+                self._main_thread = threading.current_thread()
+                main_thread = self._main_thread
+
+            current_thread = threading.current_thread()
+
+            # 如果已经在主线程中，直接执行
+            if current_thread == main_thread:
+                fn(*args, **kwargs)
+                return
+
+            # 如果不在主线程，使用invoke_later调度
+            if hasattr(self.page, "invoke_later") and callable(self.page.invoke_later):
+                self.page.invoke_later(partial(fn, *args, **kwargs))
+            else:
+                # 回退方案：直接执行并尝试更新
+                logger.warning("invoke_later不可用，直接执行UI更新（可能导致线程安全问题）")
+                fn(*args, **kwargs)
+                try:
+                    if self.page:
+                        self.page.update()
+                except Exception as update_error:
+                    logger.warning(f"UI更新失败: {update_error}")
+
+        except Exception as e:
+            logger.error(f"UI调度失败: {type(e).__name__}: {e}")
+            # 最后的保险：尝试直接执行
+            try:
+                fn(*args, **kwargs)
+            except Exception as direct_error:
+                logger.error(f"直接执行UI更新也失败: {type(direct_error).__name__}: {direct_error}")
 
     def _on_page_close(self):
         """页面关闭时的清理工作"""
@@ -136,10 +185,24 @@ class QuQuFletApp:
         self.vad_segmenter = HybridVADSegmenter(sample_rate=16000, config=self.vad_config)
 
         # 多线程任务管理器
-        # 初始化TaskManager并传入识别器（从recognition_pipeline获取）
+        # 使用新的统一任务系统
         funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
-        self.task_manager = TaskManager(funasr_recognizer=funasr_recognizer)
-        self.task_manager.start()
+        from core.task_adapter import create_task_manager
+        self.task_manager = create_task_manager(
+            use_unified_system=True,  # 使用新的统一任务系统
+            funasr_recognizer=funasr_recognizer,
+            config_manager=self.config_manager
+        )
+
+        # 尝试启动TaskManager，如果失败则记录但不阻止应用启动
+        try:
+            self.task_manager.start()
+            logger.info("新任务系统启动成功")
+            print("[INFO] 已启用新的统一任务系统，解决AI任务阻塞问题")
+        except Exception as e:
+            logger.error(f"任务系统启动失败: {e}")
+            print(f"[WARNING] 任务系统启动失败，某些功能可能不可用: {e}")
+            # 不阻止应用启动，继续初始化其他组件
 
         # 连续录音器 - 用于实时模式
         recorder_config = RecorderConfig(
@@ -159,8 +222,10 @@ class QuQuFletApp:
 
         # 设置任务管理器回调
         self.task_manager.on_recognition_complete = self._on_recognition_complete
-        self.task_manager.on_ai_optimization_complete = self._on_ai_optimization_complete
+        self.task_manager.on_correction_complete = self._on_correction_complete
+        self.task_manager.on_translation_complete = self._on_translation_complete
         self.task_manager.on_ui_update = self._on_ui_update
+        self.task_manager.on_statistics_update = self._on_statistics_update
 
         # 设置连续录音器回调
         self.continuous_recorder.on_segment_detected = self._on_audio_segment_detected
@@ -210,6 +275,14 @@ class QuQuFletApp:
         # 实时模式切换
         self.realtime_toggle = RealtimeModeToggle(
             on_change=self.toggle_realtime_mode
+        )
+
+        # 翻译开关
+        self.translation_switch = ft.Switch(
+            label="启用翻译",
+            value=self.settings.get("enable_translation", False),
+            on_change=self.toggle_translation,
+            disabled=False
         )
 
         # 结果显示区域
@@ -284,6 +357,13 @@ class QuQuFletApp:
                 ft.Row([
                     ft.Container(width=15),  # 左边距
                     self.realtime_toggle.switch,
+                    ft.Container(width=15),  # 右边距
+                ], alignment=ft.MainAxisAlignment.CENTER),
+                ft.Container(height=8),
+                # 翻译开关
+                ft.Row([
+                    ft.Container(width=15),  # 左边距
+                    self.translation_switch,
                     ft.Container(width=15),  # 右边距
                 ], alignment=ft.MainAxisAlignment.CENTER),
                 ft.Container(height=12),
@@ -429,8 +509,11 @@ class QuQuFletApp:
 
     def update_status(self, message: str):
         """更新状态显示"""
-        self.status_display.update_status(message)
-        self.page.update()
+        def _do():
+            self.status_display.update_status(message)
+            if self.page:
+                self.page.update()
+        self._dispatch_ui(_do)
 
     # 转写处理
     def on_transcription_complete(self, result: dict):
@@ -523,6 +606,17 @@ class QuQuFletApp:
             else:
                 self.update_status("实时模式已关闭")
 
+    def toggle_translation(self, e=None):
+        """切换翻译功能"""
+        is_enabled = self.translation_switch.value
+        self.config_manager.set("enable_translation", is_enabled)
+        self.config_manager.save()
+
+        if is_enabled:
+            self.update_status("翻译功能已开启")
+        else:
+            self.update_status("翻译功能已关闭")
+
     def on_vad_segment_detected(self, segment):
         """VAD段落检测回调（旧的，保留兼容性）"""
         if self.realtime_toggle.is_realtime:
@@ -533,6 +627,20 @@ class QuQuFletApp:
         """音频片段检测回调"""
         print(f"[DEBUG] 检测到音频片段: {audio_segment.segment_id}, 时长: {audio_segment.duration:.2f}s")
 
+        # 使用新的统一任务系统，直接提交完整任务
+        if hasattr(self, 'task_manager') and self.task_manager:
+            try:
+                task_id = self.task_manager.submit_task(
+                    audio_segment=audio_segment,
+                    record_id=f"record_{int(time.time() * 1000)}",
+                    enable_correction=self.settings.get("enable_ai_optimization", False),
+                    enable_translation=self.settings.get("enable_translation", False)
+                )
+                logger.info(f"提交音频任务: {task_id}")
+            except Exception as e:
+                logger.error(f"提交音频任务失败: {e}")
+                self.update_status(f"任务提交失败: {str(e)}")
+
     def _on_recognition_complete(self, task):
         """语音识别完成回调"""
         if task.result and task.result.get('success'):
@@ -540,34 +648,104 @@ class QuQuFletApp:
             confidence = task.result.get('confidence', 0)
             print(f"[DEBUG] 识别完成: {text} (置信度: {confidence:.3f})")
 
-            # 添加到结果卡片
-            self.result_card.add_result(text, ft.Colors.BLUE)
-            self.update_status(f"识别完成: {text[:20]}...")
+            # 预生成 record_id 并绑定到任务（避免跨线程取返回值）
+            import time as _time
+            record_id = f"record_{int(_time.time()*1000)}"
+            try:
+                if hasattr(self, 'task_manager') and hasattr(task, 'task_id'):
+                    if hasattr(self.task_manager, 'bind_record_id'):
+                        self.task_manager.bind_record_id(task.task_id, record_id)
+            except Exception as e:
+                logger.warning(f"绑定record_id失败: {e}")
 
-            # 启用操作按钮
-            self.action_buttons.enable_result_buttons(True)
-            self.action_buttons.row.update()
+            # 在UI线程添加记录与更新
+            def _ui_add_recognition():
+                try:
+                    self.result_card.add_recognition_result(text, record_id)
+                    self.status_display.update_status(f"识别完成: {text[:20]}...")
+                    self.action_buttons.enable_result_buttons(True)
+                    self.action_buttons.row.update()
+                    if self.page:
+                        self.page.update()
+                except Exception as e:
+                    logger.error(f"[DEBUG] 识别结果UI更新失败: {e}")
+            self._dispatch_ui(_ui_add_recognition)
 
-            # 提交UI更新
-            self.task_manager._submit_ui_update({
-                'type': 'recognition_complete',
-                'result': task.result,
-                'timestamp': time.time()
-            })
+            # 提交UI更新（供TaskMonitor等使用）
+            if hasattr(self.task_manager, '_submit_ui_update'):
+                self.task_manager._submit_ui_update({
+                    'type': 'recognition_complete',
+                    'result': task.result,
+                    'timestamp': time.time()
+                })
 
-    def _on_ai_optimization_complete(self, task):
-        """AI优化完成回调"""
-        if task.optimized_text:
-            print(f"[DEBUG] AI优化完成: {task.optimized_text}")
+    def _on_correction_complete(self, task):
+        """AI修正完成回调（新系统适配）"""
+        logger.info(f"[DEBUG] 修正完成回调被调用，task_id: {getattr(task, 'task_id', 'N/A')}")
+        logger.info(f"[DEBUG] 修正结果: {getattr(task, 'optimized_text', getattr(task, 'corrected_text', 'N/A'))}")
 
-            # 更新结果卡片中的最后一条记录
-            # 这里可以实现更复杂的优化结果展示逻辑
-            self.update_status(f"AI优化完成")
+        # 兼容两种字段名：optimized_text（处理器返回）或 corrected_text（统一任务）
+        corrected = getattr(task, 'corrected_text', None) or getattr(task, 'optimized_text', None)
+        if corrected:
+            print(f"[DEBUG] AI修正完成: {corrected}")
+
+            def _ui_add_correction():
+                try:
+                    record_id = getattr(task, 'record_id', None)
+                    if record_id:
+                        self.result_card.add_correction_result(record_id, corrected)
+                        logger.info(f"[DEBUG] 修正结果已关联到记录 {record_id}")
+                    else:
+                        self.result_card.add_result(f"[修正] {corrected}", ft.Colors.ORANGE_700)
+                        logger.info(f"[DEBUG] 修正结果已单独添加到界面")
+                    self.status_display.update_status(f"AI修正完成: {corrected[:20]}...")
+                    if self.page:
+                        self.page.update()
+                except Exception as e:
+                    logger.error(f"[DEBUG] 添加修正结果到界面失败: {e}")
+            self._dispatch_ui(_ui_add_correction)
+
+        # 注释：新的统一任务系统会自动处理翻译流程
+        # 无需手动提交翻译任务
+
+    def _on_translation_complete(self, task):
+        """翻译完成回调（新系统适配）"""
+        logger.info(f"[DEBUG] 翻译完成回调被调用，task_id: {getattr(task, 'task_id', 'N/A')}")
+        logger.info(f"[DEBUG] 翻译结果: {getattr(task, 'translated_text', 'N/A')}")
+
+        if hasattr(task, 'translated_text') and task.translated_text:
+            print(f"[DEBUG] 翻译完成: {task.translated_text}")
+
+            def _ui_add_translation():
+                try:
+                    record_id = getattr(task, 'record_id', None)
+                    if record_id:
+                        self.result_card.add_translation_result(
+                            record_id,
+                            task.translated_text,
+                            getattr(task, 'target_language', None)
+                        )
+                        logger.info(f"[DEBUG] 翻译结果已关联到记录 {record_id}")
+                    else:
+                        self.result_card.add_result(f"[翻译] {task.translated_text}", ft.Colors.GREEN_700)
+                        logger.info(f"[DEBUG] 翻译结果已单独添加到界面")
+                    self.status_display.update_status(f"翻译完成: {task.translated_text[:20]}...")
+                    if self.page:
+                        self.page.update()
+                except Exception as e:
+                    logger.error(f"[DEBUG] 添加翻译结果到界面失败: {e}")
+            self._dispatch_ui(_ui_add_translation)
 
     def _on_ui_update(self, update_data: dict):
         """UI更新回调"""
         # 这个回调会传递给TaskMonitor处理
         pass
+
+    def _on_statistics_update(self, stats):
+        """统计更新回调"""
+        # 这个回调会传递给TaskMonitor处理
+        if hasattr(self, 'task_monitor') and self.task_monitor:
+            self.task_monitor._on_statistics_update(stats)
 
     def _on_recorder_error(self, error: Exception):
         """录音器错误回调"""
@@ -869,12 +1047,12 @@ class QuQuFletApp:
     # 对话框
     def open_settings(self, e=None):
         """打开设置对话框"""
-        dialog = SettingsDialog(
+        dialog = create_settings_dialog(
             page=self.page,
-            settings=self.settings,
+            config_manager=self.config_manager,
             on_save=self.on_settings_changed
         )
-        dialog.show()
+        dialog.open()
 
     def open_help(self, e=None):
         """打开帮助对话框"""
@@ -885,17 +1063,48 @@ class QuQuFletApp:
         """设置变更回调"""
         self.settings = new_settings
 
-        # 重新初始化AI处理器
+        # 重新初始化AI处理器（使用新的配置结构）
         if new_settings.get("enable_ai_optimization", False):
+            ai_config = self.config_manager.get_ai_service_config("correction")
             self.ai_processor = AIProcessor(
-                api_key=new_settings.get("api_key", ""),
-                base_url=new_settings.get("base_url", ""),
-                model_name=new_settings.get("model_name", "")
+                api_key=ai_config.get("api_key", ""),
+                base_url=ai_config.get("base_url", ""),
+                model_name=ai_config.get("model_name", "")
             )
             self.transcription_handler.ai_processor = self.ai_processor
         else:
             self.ai_processor = None
             self.transcription_handler.ai_processor = None
+
+        # 重新初始化任务管理器（继续使用统一任务系统）
+        if hasattr(self, 'task_manager'):
+            self.task_manager.stop()
+
+        from core.task_adapter import create_task_manager
+        funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
+        self.task_manager = create_task_manager(
+            use_unified_system=True,
+            funasr_recognizer=funasr_recognizer,
+            config_manager=self.config_manager
+        )
+
+        # 设置回调函数
+        self.task_manager.on_recognition_complete = self._on_recognition_complete
+        self.task_manager.on_correction_complete = self._on_correction_complete
+        self.task_manager.on_translation_complete = self._on_translation_complete
+        self.task_manager.on_ui_update = self._on_ui_update
+        self.task_manager.on_statistics_update = self._on_statistics_update
+
+        self.task_manager.start()
+
+        # 更新ContinuousAudioRecorder的TaskManager引用
+        if hasattr(self, 'continuous_recorder'):
+            self.continuous_recorder.task_manager = self.task_manager
+
+        # 更新翻译按钮状态
+        if hasattr(self, 'translation_switch'):
+            self.translation_switch.value = new_settings.get("enable_translation", False)
+            self.page.update()
 
         self.update_status("设置已更新")
 

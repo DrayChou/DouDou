@@ -17,6 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Callable
 
+# 使用统一日志系统
+try:
+    from utils.logger import get_logger
+    logger = get_logger()
+except ImportError:
+    logger = logging.getLogger(__name__)
+
 from .audio_engine import AudioEngine, AudioStreamConfig
 from .vad_system import HybridVADSegmenter, VADSegment
 from .task_manager import TaskManager, AudioSegment
@@ -220,7 +227,7 @@ class ContinuousAudioRecorder:
             if self.audio_stream:
                 try:
                     self.audio_engine.close_stream(self.audio_stream)
-                except:
+                except Exception:
                     pass
                 self.audio_stream = None
 
@@ -259,10 +266,14 @@ class ContinuousAudioRecorder:
                     self.on_segment_detected(audio_segment)
 
                 # 提交到任务管理器
-                try:
-                    self.task_manager.submit_audio_segment(audio_segment)
-                except Exception as e:
-                    logger.error(f"提交音频片段到任务管理器失败: {e}")
+                # 注意：任务提交由flet_app的on_segment_detected回调处理，避免重复提交
+                # try:
+                #     if self.task_manager and self.task_manager.is_running:
+                #         self.task_manager.submit_audio_segment(audio_segment)
+                #     else:
+                #         logger.warning("TaskManager 未运行，跳过音频片段提交")
+                # except Exception as e:
+                #     logger.error(f"提交音频片段到任务管理器失败: {e}")
 
         except Exception as e:
             logger.error(f"处理语音片段失败: {e}")

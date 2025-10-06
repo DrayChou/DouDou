@@ -243,7 +243,7 @@ class DirectFunASR:
             import librosa
             duration = librosa.get_duration(filename=audio_path)
             return duration
-        except:
+        except Exception:
             return 0.0
 
     def check_status(self) -> Dict[str, Any]:
