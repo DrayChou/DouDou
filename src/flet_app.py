@@ -83,8 +83,8 @@ class QuQuFletApp:
             if hasattr(self.page, "invoke_later") and callable(self.page.invoke_later):
                 self.page.invoke_later(partial(fn, *args, **kwargs))
             else:
-                # 回退方案：直接执行并尝试更新
-                logger.warning("invoke_later不可用，直接执行UI更新（可能导致线程安全问题）")
+                # 回退方案：直接执行并尝试更新（正常行为，无需警告）
+                # logger.debug("invoke_later不可用，直接执行UI更新")
                 fn(*args, **kwargs)
                 try:
                     if self.page:
