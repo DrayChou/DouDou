@@ -336,6 +336,17 @@ class TaskManager:
         logger.info(f"提交音频片段任务: {task.task_id}, 文件: {audio_segment.file_path}")
         return future
 
+    def bind_record_id(self, recognition_task_id: str, record_id: str) -> bool:
+        """将UI生成的record_id绑定到指定识别任务上，便于后续修正/翻译关联UI记录"""
+        try:
+            task = self.active_tasks.get(recognition_task_id)
+            if task and isinstance(task, RecognitionTask):
+                task.record_id = record_id
+                return True
+            return False
+        except Exception:
+            return False
+
     def submit_recognition_task(self, recognition_task: RecognitionTask) -> Future:
         """提交语音识别任务"""
         if not self.is_running:
@@ -493,7 +504,8 @@ class TaskManager:
                     recognition_result=result,
                     task_id=str(uuid.uuid4()),
                     created_at=time.time(),
-                    priority=task.priority
+                    priority=task.priority,
+                    record_id=getattr(task, 'record_id', None)
                 )
                 self.submit_ai_optimization_task(ai_task)
 
@@ -652,6 +664,24 @@ class TaskManager:
                         self.statistics.translation_processing -= 1
                         self.statistics.translation_completed += 1
                     self.statistics.total_processed += 1
+
+                # 如果是修正任务且启用翻译，自动提交翻译任务
+                if task_type == "correction" and self.config_manager and self.config_manager.get('enable_translation', False):
+                    try:
+                        tr_cfg = self.config_manager.get_ai_service_config('translation')
+                        target_lang = tr_cfg.get('target_language', 'en')
+                        tr_task = TranslationTask(
+                            original_text=getattr(task, 'optimized_text', None) or getattr(task, 'original_text', ''),
+                            source_language='zh',
+                            target_language=target_lang,
+                            task_id=str(uuid.uuid4()),
+                            created_at=time.time(),
+                            priority=task.priority,
+                            record_id=getattr(task, 'record_id', None)
+                        )
+                        self.submit_translation_task(tr_task)
+                    except Exception as e:
+                        logger.error(f"自动提交翻译任务失败: {e}")
 
                 return {
                     'task_id': task.task_id,

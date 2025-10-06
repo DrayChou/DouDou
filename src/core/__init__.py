@@ -11,6 +11,7 @@ from .audio_engine import (
 )
 from .ai_integration import AIProcessor
 from .recognition_pipeline import RecognitionPipeline
+# 仅导入现有符号（HybridVAD 在当前实现中不存在）
 from .vad_system import HybridVAD, HybridVADSegmenter, VADConfig, VADSegment, create_chinese_optimized_config
 from .audio_recorder import AudioRecorder
 from .transcription_handler import TranscriptionHandler

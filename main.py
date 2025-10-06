@@ -37,13 +37,56 @@ else:
 # 在开发环境中，src目录在项目根目录下
 import_successful = False
 
-# 首先尝试直接从src导入（开发环境）
+# 规范化 sys.path：确保 src 优先，其次是项目根目录
+src_path = os.path.join(base_path, 'src')
+if os.path.exists(src_path):
+    # 去重并确保顺序: [src, base, 其他]
+    rest = [p for p in sys.path if p not in (src_path, base_path)]
+    sys.path = [src_path, base_path] + rest
+    print(f"sys.path[0..1] 已设置为: {sys.path[:2]}")
+else:
+    print(f"未找到 src 目录: {src_path}")
+
+# 首先尝试：在把 src 放入 sys.path 后，直接导入 flet_app（模块路径：src/flet_app.py）
 try:
-    from src.flet_app import QuQuFletApp
-    print("✅ src.flet_app 导入成功")
+    from flet_app import QuQuFletApp
+    print("✅ flet_app (from src) 导入成功")
     import_successful = True
-except ImportError:
-    print("⚠️  src.flet_app 导入失败")
+except ImportError as e:
+    print(f"⚠️  flet_app(from src) 导入失败: {e}")
+
+# 如果失败，再尝试从根目录作为包导入 src.flet_app
+if not import_successful:
+    try:
+        if base_path not in sys.path:
+            sys.path.insert(0, base_path)
+        from src.flet_app import QuQuFletApp
+        print("✅ src.flet_app 导入成功")
+        import_successful = True
+    except ImportError as e:
+        print(f"❌ src.flet_app 导入失败: {e}")
+
+# 最后尝试：直接从文件路径加载 flet_app.py
+if not import_successful:
+    try:
+        import importlib.util
+        module_path = os.path.join(src_path, 'flet_app.py')
+        if os.path.exists(module_path):
+            spec = importlib.util.spec_from_file_location('flet_app', module_path)
+            if spec and spec.loader:
+                flet_app_mod = importlib.util.module_from_spec(spec)
+                sys.modules['flet_app'] = flet_app_mod
+                spec.loader.exec_module(flet_app_mod)
+                from flet_app import QuQuFletApp
+                print("✅ flet_app (from file) 导入成功")
+                import_successful = True
+            else:
+                print("❌ 无法创建 flet_app 模块规范 (spec)")
+        else:
+            print(f"❌ 未找到文件: {module_path}")
+    except Exception as e:
+        print(f"❌ 文件路径导入失败: {e}")
+        import traceback; traceback.print_exc()
 
 # 如果失败，尝试从根目录导入（打包环境）
 if not import_successful:

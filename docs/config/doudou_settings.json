@@ -5,11 +5,17 @@
       "base_url": "http://localhost:11435/v1",
       "model_name": "qwen/qwen3-1.7b"
     },
+    "correction": {
+      "system_prompt": "你是语音识别文本修正专家，请优化以下语音识别文本：\n\n要求：\n1. 修正明显的语音识别错误\n2. 添加适当的标点符号\n3. 保持原意不变\n4. 使表达更加流畅自然\n5. 如果原文已经很好，可以不做修改\n\n请直接返回优化后的文本，不要添加任何解释：",
+      "system_prompt_file": ""
+    },
     "translation": {
-      "target_language": "en",
       "api_key": "1234",
       "base_url": "http://localhost:11435/v1",
-      "model_name": "qwen/qwen3-1.7b"
+      "model_name": "qwen/qwen3-1.7b",
+      "target_language": "ja",
+      "system_prompt": "你是专业翻译助手，请将以下文本翻译成目标语言：\n\n要求：\n1. 保持原意不变\n2. 语法正确，表达自然\n3. 符合目标语言的表达习惯\n4. 专业术语翻译准确\n5. 保留适当的格式和标点\n\n请直接返回翻译后的文本，不要添加任何解释：",
+      "system_prompt_file": ""
     }
   },
   "language": "zh",
