@@ -188,8 +188,9 @@ class QuQuFletApp:
         # 使用新的统一任务系统
         funasr_recognizer = self.recognition_pipeline.direct_funasr if self.recognition_pipeline.use_direct_integration else None
         from core.task_adapter import create_task_manager
+        # 使用新的统一任务系统（解决AI任务阻塞问题）
         self.task_manager = create_task_manager(
-            use_unified_system=True,  # 使用新的统一任务系统
+            use_unified_system=True,
             funasr_recognizer=funasr_recognizer,
             config_manager=self.config_manager
         )
@@ -630,13 +631,9 @@ class QuQuFletApp:
         # 使用新的统一任务系统，直接提交完整任务
         if hasattr(self, 'task_manager') and self.task_manager:
             try:
-                task_id = self.task_manager.submit_task(
-                    audio_segment=audio_segment,
-                    record_id=f"record_{int(time.time() * 1000)}",
-                    enable_correction=self.settings.get("enable_ai_optimization", False),
-                    enable_translation=self.settings.get("enable_translation", False)
-                )
-                logger.info(f"提交音频任务: {task_id}")
+                # 统一调用 submit_audio_segment，原TaskManager/适配器均支持
+                fut = self.task_manager.submit_audio_segment(audio_segment)
+                logger.info(f"提交音频任务: {getattr(fut, 'task_id', 'future')} ")
             except Exception as e:
                 logger.error(f"提交音频任务失败: {e}")
                 self.update_status(f"任务提交失败: {str(e)}")
