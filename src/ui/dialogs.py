@@ -196,3 +196,26 @@ class HelpDialog:
     def _on_close(self, e):
         """关闭按钮处理"""
         self.page.close(self.dialog)
+
+
+def create_settings_dialog(page: ft.Page, config_manager, on_save: Callable):
+    """
+    创建设置对话框的工厂函数
+
+    Args:
+        page: Flet页面对象
+        config_manager: 配置管理器实例
+        on_save: 保存回调函数
+
+    Returns:
+        设置对话框实例
+    """
+    try:
+        # 尝试导入增强设置对话框
+        from .enhanced_settings_dialog import EnhancedSettingsDialog
+        return EnhancedSettingsDialog(page, config_manager, on_save)
+    except ImportError:
+        # 如果导入失败，使用基础设置对话框
+        print("[警告] 无法导入增强设置对话框，使用基础版本")
+        settings = config_manager.get_all()
+        return SettingsDialog(page, settings, on_save)

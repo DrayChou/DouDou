@@ -41,15 +41,21 @@ class TaskMonitor:
         self.status_container: Optional[ft.Container] = None
         self.progress_audio: Optional[ft.ProgressRing] = None
         self.progress_recognition: Optional[ft.ProgressRing] = None
-        self.progress_ai: Optional[ft.ProgressRing] = None
+        self.progress_correction: Optional[ft.ProgressRing] = None
+        self.progress_translation: Optional[ft.ProgressRing] = None
 
         # 统计文本控件
         self.audio_count_text: Optional[ft.Text] = None
         self.recognition_count_text: Optional[ft.Text] = None
-        self.ai_count_text: Optional[ft.Text] = None
+        self.correction_count_text: Optional[ft.Text] = None
+        self.translation_count_text: Optional[ft.Text] = None
         self.total_count_text: Optional[ft.Text] = None
         self.success_rate_text: Optional[ft.Text] = None
         self.uptime_text: Optional[ft.Text] = None
+
+        # 向后兼容
+        self.progress_ai = None
+        self.ai_count_text = None
 
         # 日志列表
         self.log_list: Optional[ft.ListView] = None
@@ -80,17 +86,31 @@ class TaskMonitor:
             bgcolor=ft.Colors.GREEN_50
         )
 
-        self.progress_ai = ft.ProgressRing(
+        self.progress_correction = ft.ProgressRing(
             width=20,
             height=20,
             color=ft.Colors.ORANGE,
             bgcolor=ft.Colors.ORANGE_50
         )
 
+        self.progress_translation = ft.ProgressRing(
+            width=20,
+            height=20,
+            color=ft.Colors.PURPLE,
+            bgcolor=ft.Colors.PURPLE_50
+        )
+
+        # 向后兼容
+        self.progress_ai = self.progress_correction
+
         # 创建统计文本
         self.audio_count_text = ft.Text("0", size=12, width=30, text_align=ft.TextAlign.CENTER)
         self.recognition_count_text = ft.Text("0", size=12, width=30, text_align=ft.TextAlign.CENTER)
-        self.ai_count_text = ft.Text("0", size=12, width=30, text_align=ft.TextAlign.CENTER)
+        self.correction_count_text = ft.Text("0", size=12, width=30, text_align=ft.TextAlign.CENTER)
+        self.translation_count_text = ft.Text("0", size=12, width=30, text_align=ft.TextAlign.CENTER)
+
+        # 向后兼容
+        self.ai_count_text = self.correction_count_text
         self.total_count_text = ft.Text("0", size=12, weight=ft.FontWeight.BOLD)
         self.success_rate_text = ft.Text("0%", size=12, color=ft.Colors.GREEN)
         self.uptime_text = ft.Text("00:00:00", size=11, color=ft.Colors.GREY_600)
@@ -130,7 +150,9 @@ class TaskMonitor:
                         ft.Container(height=4),
                         self._build_task_status_row("识别", self.progress_recognition, self.recognition_count_text, ft.Colors.GREEN),
                         ft.Container(height=4),
-                        self._build_task_status_row("AI优化", self.progress_ai, self.ai_count_text, ft.Colors.ORANGE),
+                        self._build_task_status_row("修正", self.progress_correction, self.correction_count_text, ft.Colors.ORANGE),
+                        ft.Container(height=4),
+                        self._build_task_status_row("翻译", self.progress_translation, self.translation_count_text, ft.Colors.PURPLE),
                         ft.Divider(height=1, color=ft.Colors.GREY_300),
                         ft.Container(
                             content=ft.Row([
@@ -172,15 +194,16 @@ class TaskMonitor:
                             content=self.log_list,
                             padding=ft.padding.symmetric(horizontal=10, vertical=5),
                             bgcolor=ft.Colors.GREY_50,
-                            border_radius=4
+                            border_radius=4,
+                            expand=True
                         )
                     ]),
                     expand=True
                 ),
 
-            ], spacing=0),
+            ], spacing=0, expand=True),
             width=300,
-            height=400,
+            expand=True,  # 自适应高度
             bgcolor=ft.Colors.WHITE,
             border=ft.border.all(1, ft.Colors.GREY_300),
             border_radius=8,
@@ -224,19 +247,27 @@ class TaskMonitor:
         self.current_stats = stats
         self.last_update_time = time.time()
 
-        # 计算总待处理数
-        total_pending = (stats.audio_pending + stats.recognition_pending + stats.ai_pending)
-        total_processing = (stats.audio_processing + stats.recognition_processing + stats.ai_processing)
+        # 计算总待处理数（包含翻译任务）
+        total_pending = (stats.audio_pending + stats.recognition_pending +
+                        stats.correction_pending + stats.translation_pending)
+        total_processing = (stats.audio_processing + stats.recognition_processing +
+                           stats.correction_processing + stats.translation_processing)
 
         # 更新进度环
         self._update_progress_ring(self.progress_audio, stats.audio_processing, total_pending + total_processing)
         self._update_progress_ring(self.progress_recognition, stats.recognition_processing, total_pending + total_processing)
-        self._update_progress_ring(self.progress_ai, stats.ai_processing, total_pending + total_processing)
+        self._update_progress_ring(self.progress_correction, stats.correction_processing, total_pending + total_processing)
+        self._update_progress_ring(self.progress_translation, stats.translation_processing, total_pending + total_processing)
 
         # 更新计数文本 - 显示 (待处理+处理中) 的数量
         self.audio_count_text.value = str(stats.audio_pending + stats.audio_processing)
         self.recognition_count_text.value = str(stats.recognition_pending + stats.recognition_processing)
-        self.ai_count_text.value = str(stats.ai_pending + stats.ai_processing)
+        self.correction_count_text.value = str(stats.correction_pending + stats.correction_processing)
+        self.translation_count_text.value = str(stats.translation_pending + stats.translation_processing)
+
+        # 向后兼容
+        if self.ai_count_text:
+            self.ai_count_text.value = str(stats.correction_pending + stats.correction_processing)
 
         # 更新总计和成功率
         total_count = stats.total_processed + stats.total_failed
@@ -270,12 +301,19 @@ class TaskMonitor:
         update_type = update_data.get('type', '')
         timestamp = time.strftime("%H:%M:%S")
 
-        if update_type == 'ai_optimization_complete':
+        if update_type == 'correction_complete':
             self._add_log_entry(
                 timestamp=timestamp,
-                message=f"AI优化完成: {update_data.get('optimized_text', 'N/A')[:30]}...",
+                message=f"文本修正完成: {update_data.get('result', 'N/A')[:30]}...",
                 color=ft.Colors.GREEN,
                 icon=ft.Icons.CHECK_CIRCLE
+            )
+        elif update_type == 'translation_complete':
+            self._add_log_entry(
+                timestamp=timestamp,
+                message=f"翻译完成: {update_data.get('result', 'N/A')[:30]}...",
+                color=ft.Colors.PURPLE,
+                icon=ft.Icons.TRANSLATE
             )
         elif update_type == 'recognition_complete':
             self._add_log_entry(
@@ -283,6 +321,14 @@ class TaskMonitor:
                 message=f"识别完成: {update_data.get('result', {}).get('text', 'N/A')[:30]}...",
                 color=ft.Colors.BLUE,
                 icon=ft.Icons.RECORD_VOICE_OVER
+            )
+        # 向后兼容
+        elif update_type == 'ai_optimization_complete':
+            self._add_log_entry(
+                timestamp=timestamp,
+                message=f"AI优化完成: {update_data.get('optimized_text', 'N/A')[:30]}...",
+                color=ft.Colors.GREEN,
+                icon=ft.Icons.CHECK_CIRCLE
             )
         elif update_type == 'error':
             self._add_log_entry(
@@ -358,6 +404,10 @@ class TaskMonitor:
         if self.update_thread and self.update_thread.is_alive():
             self.update_thread.join(timeout=2.0)
 
+    def stop(self):
+        """停止方法（兼容性）"""
+        self.stop_monitoring()
+
     def _monitoring_loop(self):
         """监控循环"""
         while not self.stop_event.is_set():
@@ -369,6 +419,15 @@ class TaskMonitor:
 
                 time.sleep(1.0)  # 每秒更新一次
 
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    # 事件循环已关闭，停止监控
+                    import logging
+                    logging.info("检测到事件循环已关闭，停止监控循环")
+                    break
+                else:
+                    print(f"监控循环异常: {e}")
+                    time.sleep(1.0)
             except Exception as e:
                 print(f"监控循环异常: {e}")
                 time.sleep(1.0)
