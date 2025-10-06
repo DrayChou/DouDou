@@ -47,6 +47,11 @@
 - 🌐 **开放AI生态**: 支持任何兼容 OpenAI API 的服务
 - 🏗️ **模块化架构**: 采用清晰的分层设计，代码易于维护和扩展
 - 🔄 **组件化设计**: UI组件可复用，支持快速开发和迭代
+- 🤖 **智能文本处理**: AI修正识别错误，自动添加标点
+- 🌍 **自动翻译**: 支持多语言翻译，可配置独立API
+- 📝 **自定义Prompt**: 灵活的提示词配置，满足个性化需求
+- 📊 **任务监控**: 实时显示处理状态和统计信息
+- 📄 **完整日志**: 所有操作自动记录到日志文件，便于调试
 
 ---
 
@@ -82,7 +87,7 @@ python smart_gpu_setup.py
 ## 🚀 快速开始
 
 ### 1. 环境要求
-- **Python 3.11+**
+- **Python 3.11+** (推荐 3.13)
 - **Windows 10+**, **macOS 10.15+**, 或 **Linux**
 - （可选）NVIDIA GPU + CUDA 11.8+ 用于加速
 
@@ -90,8 +95,8 @@ python smart_gpu_setup.py
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/yan5xu/ququ.git
-cd ququ
+git clone https://github.com/DrayChou/DouDou.git
+cd DouDou
 
 # 2. 创建虚拟环境
 python -m venv .venv
@@ -102,57 +107,196 @@ python -m venv .venv
 source .venv/bin/activate
 
 # 3. 安装依赖
-pip install -e .
+pip install -r requirements.txt
 
-# 4. 运行应用
-python main.py
+# 4. 下载FunASR模型（首次运行）
+python download_models.py
+
+# 5. 运行应用
+cd src
+python flet_app.py
 ```
 
 #### 使用启动脚本 (Windows)
 
-- **标准启动**: 双击 `run.bat` 文件即可启动应用
-- **管理员权限启动**: 如果遇到音频驱动问题，双击 `run_as_admin.bat` 文件以管理员权限启动（可以解决Windows音频设备兼容性问题）
+项目提供了便捷的Windows启动脚本：
 
-### 3. 配置AI模型
+- **标准启动**: 双击 `run.bat` 文件
+  - 自动激活虚拟环境
+  - 启动应用
 
-启动应用后，在设置中填入您的AI服务商提供的 **API Key**、**Base URL** 和 **模型名称**。支持通义千问、Kimi、智谱AI等国产模型。
+- **管理员权限启动**: 双击 `run_as_admin.bat` 文件
+  - 解决Windows音频设备兼容性问题（Error -9999）
+  - 需要访问WASAPI loopback设备时使用
+
+> **提示**: 如果遇到音频设备无法识别或录音失败，请尝试使用管理员权限启动。
+
+### 3. 配置AI服务
+
+应用支持两种AI服务配置方式：
+
+#### 方式1: 本地AI服务（推荐用于开发/隐私）
+- 使用 [Jan Desktop](https://jan.ai/) 或其他本地LLM服务
+- 默认配置: `http://localhost:11435/v1`
+- 优点: 完全本地运行，数据隐私
+
+#### 方式2: 云端AI服务
+在设置中配置：
+- **API Key**: 您的服务商API密钥
+- **Base URL**: API端点地址
+- **模型名称**: 使用的模型名称
+
+支持的服务商：
+- OpenAI (GPT-4, GPT-3.5)
+- 通义千问 (Qwen)
+- DeepSeek
+- Kimi
+- 智谱AI (GLM)
+
+### 4. 新增功能配置
+
+#### AI文本修正
+- 自动修正语音识别错误
+- 添加标点符号
+- 优化表达流畅度
+- 在设置 → 基础设置中启用
+
+#### AI翻译
+- 支持识别结果自动翻译
+- 可配置目标语言（日语、英语等）
+- 支持独立API配置或复用修正配置
+- 在设置 → 翻译设置中配置
+
+#### 自定义Prompt
+- 支持自定义AI处理提示词
+- 可保存为文件或内联配置
+- 在设置 → Prompt设置中编辑
 
 ## 🛠️ 技术栈
 
-- **UI框架**: Flet
+- **UI框架**: Flet - Python跨平台桌面应用框架
 - **语音识别**: FunASR (Paraformer-large, FSMN-VAD, CT-Transformer)
-- **AI模型**: 兼容 OpenAI, Anthropic, 阿里云通义千问, Kimi 等
-- **音频处理**: PyAudio, NumPy, Librosa
+- **AI集成**: OpenAI兼容API，支持本地和云端服务
+- **音频处理**: PyAudio/PyAudioWPatch, NumPy, Librosa
+- **并发处理**: ThreadPoolExecutor多线程任务队列
+- **日志系统**: Python logging + 文件轮转
+- **配置管理**: JSON配置文件 + 分层继承机制
 
 ## 📁 项目结构
 
 ```
 ququ_flet/
-├── main.py             # 应用入口文件
-├── src/                # 源代码目录
-│   ├── flet_app.py         # 主应用（协调器模式）
-│   ├── core/               # 核心业务逻辑
-│   │   ├── audio_engine.py      # 音频引擎
-│   │   ├── audio_recorder.py   # 录音管理器
-│   │   ├── transcription_handler.py  # 转写处理器
-│   │   ├── vad_system.py       # 语音活动检测
-│   │   ├── ai_integration.py   # AI集成
-│   │   └── recognition_pipeline.py  # 识别流水线
-│   ├── ui/                 # 用户界面
-│   │   ├── components.py       # UI组件
-│   │   └── dialogs.py          # 对话框
-│   ├── utils/              # 工具模块
-│   │   ├── config_manager.py   # 配置管理
-│   │   └── audio_utils.py      # 音频工具
-│   └── funasr_server.py    # FunASR 服务
-├── download_models.py   # 模型下载脚本
-├── run.bat             # Windows 启动脚本
-├── run_as_admin.bat    # 管理员权限启动脚本
-├── pyproject.toml      # Python 项目配置
-├── requirements.txt    # 依赖列表
-├── assets/            # 图标资源
-└── README.md          # 项目说明
+├── src/                    # 源代码目录
+│   ├── flet_app.py            # 主应用入口
+│   ├── core/                  # 核心业务逻辑
+│   │   ├── audio_engine.py         # 音频引擎
+│   │   ├── continuous_recorder.py  # 连续录音器
+│   │   ├── vad_system.py           # VAD语音检测
+│   │   ├── direct_funasr.py        # FunASR集成
+│   │   ├── task_manager.py         # 多线程任务管理
+│   │   └── task_processors/        # 任务处理器
+│   │       ├── base_processor.py       # 处理器基类
+│   │       ├── correction_processor.py # AI修正处理器
+│   │       └── translation_processor.py # 翻译处理器
+│   ├── ui/                    # 用户界面
+│   │   ├── components.py           # UI组件库
+│   │   ├── dialogs.py              # 对话框
+│   │   ├── task_monitor.py         # 任务监控UI
+│   │   └── enhanced_settings_dialog.py # 增强设置界面
+│   └── utils/                 # 工具模块
+│       ├── config_manager.py       # 配置管理
+│       └── logger.py               # 日志系统
+├── logs/                   # 日志文件目录
+├── docs/                   # 文档目录
+│   ├── config/                # 配置文件
+│   └── *.md                   # 开发文档
+├── tests/                  # 测试文件
+├── download_models.py      # 模型下载脚本
+├── run.bat                # Windows启动脚本
+├── run_as_admin.bat       # 管理员权限启动
+├── requirements.txt       # 依赖列表
+└── README.md             # 项目说明
 ```
+
+## 🔧 开发者指南
+
+### 日志系统
+
+应用使用统一的日志系统，所有日志会自动记录到 `logs/` 目录：
+
+- `logs/ququ_YYYY-MM-DD.log` - 主日志文件（所有级别）
+- `logs/ququ_error_YYYY-MM-DD.log` - 错误日志文件（仅ERROR及以上）
+
+日志特性：
+- 自动按日期分割
+- 文件大小轮转（主日志10MB，错误日志5MB）
+- 自动记录所有print输出
+- 支持调试和生产环境
+
+### 故障排查
+
+#### AI功能无输出
+1. 检查AI服务是否运行：
+   ```bash
+   curl http://localhost:11435/v1/models
+   ```
+2. 查看错误日志：`logs/ququ_error_*.log`
+3. 确认配置文件中的API配置正确
+
+#### 音频设备问题
+- Windows Error -9999：使用 `run_as_admin.bat` 启动
+- 设备无法识别：检查设备是否被其他程序占用
+- 录音无声：确认选择了正确的输入设备
+
+#### 窗口关闭后仍有进程
+- 正常现象：监控线程需要时间清理
+- 如需强制结束：`taskkill /F /IM python.exe`
+
+### 测试
+
+项目包含测试脚本用于验证功能：
+
+```bash
+# 测试修复功能
+python test_fixes.py
+
+# 测试AI修正任务
+python test_correction.py
+
+# 测试UI集成
+python -m pytest tests/test_ui_integration.py -v
+```
+
+## 🚀 路线图
+
+### 已完成 ✅
+- [x] 模块化架构重构
+- [x] AI文本修正功能
+- [x] 多语言翻译支持
+- [x] 自定义Prompt配置
+- [x] 任务监控界面
+- [x] 完整日志系统
+- [x] 多线程任务队列
+
+### 开发中 🚧
+- [ ] 更多语言支持（英文、韩文等）
+- [ ] 语音唤醒功能
+- [ ] 历史记录管理
+- [ ] 快捷键支持
+
+### 计划中 📋
+- [ ] 插件系统
+- [ ] 云同步功能
+- [ ] 跨平台打包（Windows/macOS/Linux）
+- [ ] 语音合成（TTS）功能
+
+## ⚠️ 已知限制
+
+- **打包暂不支持**：由于Flet框架打包复杂性，暂时不提供打包版本，需要Python环境运行
+- **平台测试**：主要在Windows平台测试，macOS和Linux支持待验证
+- **GPU依赖**：GPU加速需要NVIDIA显卡和CUDA环境
+- **模型大小**：FunASR模型较大（约1-2GB），首次运行需要下载
+- **FFmpeg警告**：启动时可能出现FFmpeg扩展警告，不影响核心语音识别功能，可忽略
 
 ## 🤝 参与贡献
 
@@ -160,8 +304,8 @@ ququ_flet/
 
 ### 如何参与
 
-- 🤔 **提建议**: 对产品有任何想法？欢迎到 [Issues](https://github.com/yan5xu/ququ/issues) 页面提出。
-- 🐛 **报Bug**: 发现程序出错了？请毫不犹豫地告诉我们。
+- 🤔 **提建议**: 对产品有任何想法？欢迎到 [Issues](https://github.com/DrayChou/DouDou/issues) 页面提出。
+- 🐛 **报Bug**: 发现程序出错了？请毫不犹豫地告诉我们（附上 `logs/` 目录中的日志）。
 - 💻 **贡献代码**: 如果您想添加新功能或修复Bug，请参考以下步骤：
     1.  Fork 本项目
     2.  创建您的特性分支 (`git checkout -b feature/your-amazing-feature`)
@@ -169,60 +313,23 @@ ququ_flet/
     4.  将您的分支推送到远程 (`git push origin feature/your-amazing-feature`)
     5.  创建一个 Pull Request
 
-## 📦 打包分发
+### 开发规范
 
-### Windows 平台打包 ✅
-
-DouDou 支持 Windows 平台打包，可以生成独立的可执行文件，无需安装Python环境即可运行。
-
-#### 快速打包
-
-```bash
-# 一键打包（推荐）
-build_windows.bat
-```
-
-#### 手动打包
-
-```bash
-# 安装打包依赖
-pip install -r build/pyinstaller/build_requirements.txt
-
-# 运行打包脚本
-python build/pyinstaller/build.py
-```
-
-#### 打包输出
-
-打包完成后，会在 `release/` 目录生成：
-- `DouDou.exe` - 独立可执行文件
-- `DouDou-Windows-x64-v1.0.0.zip` - 完整发布包
-- 配置文件和启动脚本
-
-#### 平台兼容性说明
-
-- ✅ **Windows**: 完整支持，已测试
-- ⚠️ **macOS**: 理论支持，但缺少macOS设备进行测试
-- ⚠️ **Linux**: 理论支持，但缺少Linux桌面环境进行测试
-
-> **注意**: 由于开发者只有Windows设备，目前只能确保Windows平台的打包质量。欢迎社区用户测试其他平台并提供反馈。
-
-### 跨平台构建计划
-
-未来计划通过GitHub Actions实现真正的跨平台自动构建：
-
-```yaml
-# .github/workflows/build.yml
-# 支持 Windows、macOS、Linux 三平台自动构建
-```
+- 遵循Python PEP 8编码规范
+- 使用类型提示（Type Hints）
+- 编写必要的文档和注释
+- 提交前运行测试确保功能正常
 
 ## 🙏 致谢
 
 本项目的诞生离不开以下优秀项目的启发和支持：
 
-- [FunASR](https://github.com/modelscope/FunASR): 阿里巴巴开源的工业级语音识别工具包。
-- [Flet](https://flet.dev/): 现代化的 Python UI 框架。
-- [PyInstaller](https://pyinstaller.org/): Python应用打包工具。
+- [FunASR](https://github.com/modelscope/FunASR): 阿里巴巴开源的工业级语音识别工具包
+- [Flet](https://flet.dev/): 现代化的 Python UI 框架
+- [Jan](https://jan.ai/): 开源的本地AI运行环境
+- [PyAudio](https://people.csail.mit.edu/hubert/pyaudio/): Python音频处理库
+
+特别感谢原项目 [QuQu (蛐蛐)](https://github.com/yan5xu/ququ) 提供的基础代码。
 
 ## 📄 许可证
 
