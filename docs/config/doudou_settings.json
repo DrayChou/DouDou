@@ -1,11 +1,22 @@
 {
-  "api_key": "1234",
-  "base_url": "http://localhost:11435/v1",
-  "model_name": "jan-v1-4b",
+  "ai_services": {
+    "default": {
+      "api_key": "1234",
+      "base_url": "http://localhost:11435/v1",
+      "model_name": "qwen/qwen3-1.7b"
+    },
+    "translation": {
+      "target_language": "en",
+      "api_key": "1234",
+      "base_url": "http://localhost:11435/v1",
+      "model_name": "qwen/qwen3-1.7b"
+    }
+  },
   "language": "zh",
   "use_vad": true,
   "use_punc": true,
   "enable_ai_optimization": true,
+  "enable_translation": true,
   "last_audio_device_index": 1,
-  "last_audio_device_name": "Microphone (USB Camera Audio)"
+  "last_audio_device_name": "Microphone Array (Realtek(R) Au"
 }
