@@ -579,8 +579,8 @@ class QuQuFletApp:
 
     def on_ai_optimization_complete(self, optimized_text: str):
         """AI优化完成回调"""
-        # 过滤AI回答中的思考内容
-        filtered_text = self._filter_ai_thinking_content(optimized_text)
+        # 智能提取修正结果，过滤掉思考内容和分析过程
+        filtered_text = self._extract_correction_result(optimized_text)
         # 更新最近的识别记录，添加修正文本
         success = self.result_card.update_latest_correction(filtered_text)
         if success:
@@ -621,6 +621,301 @@ class QuQuFletApp:
         filtered_text = '\n'.join(line.strip() for line in filtered_text.split('\n'))
 
         return filtered_text
+
+    def _extract_translation_result(self, text: str) -> str:
+        """智能提取翻译结果，过滤掉对话过程、思考内容和多余信息"""
+        import re
+
+        # 首先应用基本的思考内容过滤
+        text = self._filter_ai_thinking_content(text)
+
+        # 移除对话式的交互内容
+        conversation_patterns = [
+            r'好的，用户让我.*?需要：',  # 开头的理解性话语
+            r'首先，检查.*?接下来，',   # 分析过程描述
+            r'然后，确保.*?最后，',     # 步骤描述
+            r'接下来，.*?最终，',       # 过程描述
+            r'我需要.*?我会：',         # 自我描述
+            r'让我.*?我应该：',         # 思考过程
+            r'原文是：.*?译文是：',     # 直接的翻译说明
+            r'源语言：.*?目标语言：',   # 语言标签
+            r'需要翻译的文本：',        # 翻译任务说明
+            r'请将.*?翻译成',           # 翻译指令
+            r'以下是翻译结果：',        # 结果引导语
+            r'(翻译完成|Translation complete|日語に翻訳完成)',  # 完成标记
+            r'注意：.*?另外：',         # 补充说明
+            r'解释：.*?说明：',         # 解释性内容
+            r'目标语言：',             # 语言标签
+            r'Assistant:.*?需要翻译的文本：',  # Assistant格式的任务描述
+            r'Human:.*?翻译后的文本：',  # Human格式的结果标记
+            r'输出：',                 # 输出标记
+        ]
+
+        cleaned_text = text
+        for pattern in conversation_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除括号中的说明性文字（中文和英文）
+        explanation_patterns = [
+            r'\([^)]*解释[^)]*\)',      # 包含"解释"的括号
+            r'\([^)]*说明[^)]*\)',      # 包含"说明"的括号
+            r'\([^)]*注[^)]*\)',         # 包含"注"的括号
+            r'\([^)]*note[^)]*\)',      # 包含"note"的括号
+            r'\（[^）]*解释[^）]*\）',    # 中文括号的解释
+            r'\（[^）]*说明[^）]*\）',    # 中文括号的说明
+        ]
+
+        for pattern in explanation_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除常见的连接词和过渡语
+        transition_patterns = [
+            r'^(好的|嗯|那么|接下来|然后|另外|此外|还有|同时)\s*[，：。]',
+            r'\s+(好的|嗯|那么|接下来|然后|另外|此外|还有|同时)\s*[，：。]',
+            r'^(首先|其次|最后|最终|总之|总结)\s*[，：。]',
+            r'\s+(首先|其次|最后|最终|总之|总结)\s*[，：。]',
+        ]
+
+        for pattern in transition_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.MULTILINE | re.IGNORECASE)
+
+        # 移除重复的标点符号
+        cleaned_text = re.sub(r'[，。！？]{2,}', lambda m: m.group(0)[0], cleaned_text)
+        cleaned_text = re.sub(r'[，。！？]\s*[，。！？]', lambda m: m.group(0)[0], cleaned_text)
+
+        # 智能提取翻译结果 - 寻找最可能的翻译内容
+        lines = cleaned_text.split('\n')
+        translation_candidates = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 跳过明显的非翻译内容
+            skip_patterns = [
+                r'^(Human|Assistant|User|AI):',  # 对话标签
+                r'^\d+\.',                      # 数字列表
+                r'^[一二三四五六七八九十]+[、.]',  # 中文数字列表
+                r'^[•\-\*]\s',                  # 项目符号
+                r'^(要求|注意|说明|解释):',      # 说明性文字开头
+                r'^(请|需要|应该|必须)',          # 指令性文字开头
+                r'(翻译|translate|translation)', # 包含翻译相关词汇
+                r'(检查|确保|保持|符合)',         # 包含检查相关词汇
+                r'需要翻译的文本：',              # 任务描述
+                r'翻译后的文本：',                # 结果标记
+                r'目标语言：',                    # 语言标签
+                r'^「',                         # 中文引号开头（通常是原文）
+                r'^（注：',                      # 注释开头
+                r'^\(注：',                      # 英文注释开头
+            ]
+
+            should_skip = False
+            for pattern in skip_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    should_skip = True
+                    break
+
+            if not should_skip and len(line) > 5:  # 过短的行很可能是噪音
+                translation_candidates.append(line)
+
+        # 特殊处理：如果有多行文本，尝试提取最可能的翻译结果
+        if len(translation_candidates) > 1:
+            # 查找包含引号的行（可能是直接翻译结果）
+            quoted_candidates = []
+            for candidate in translation_candidates:
+                if (candidate.startswith('「') and candidate.endswith('」')) or \
+                   (candidate.startswith('"') and candidate.endswith('"')) or \
+                   (candidate.startswith('"') and candidate.endswith('"')):
+                    quoted_candidates.append(candidate)
+
+            if quoted_candidates:
+                translation_candidates = quoted_candidates
+
+        # 如果还是没有找到合适的候选，尝试更智能的模式匹配
+        if not translation_candidates:
+            # 使用正则表达式直接提取翻译结果
+            translation_patterns = [
+                r'「([^」]+)」',                    # 中文引号内容
+                r'"([^"]+)"',                     # 英文引号内容
+                r'"([^"]+)"',                     # 中文引号内容
+                r'翻译后的文本[:：]\s*(.+)',        # "翻译后的文本："格式
+                r'Assistant[:：]\s*(.+)',          # Assistant: 后的内容
+                r'输出[:：]\s*(.+)',               # "输出："格式
+                r'(?:翻译|译文)[:：]\s*(.+)',      # "翻译/译文："格式
+            ]
+
+            for pattern in translation_patterns:
+                matches = re.findall(pattern, cleaned_text, re.MULTILINE | re.DOTALL)
+                for match in matches:
+                    if isinstance(match, tuple):
+                        match = match[0]
+                    if match and len(match.strip()) > 5:
+                        translation_candidates.append(match.strip())
+
+        # 如果有候选行，选择最合适的
+        if translation_candidates:
+            # 优先选择包含目标语言特征的行
+            target_language_patterns = {
+                'ja': r'[ひらがなカタカナ漢字]',  # 日语字符
+                'en': r'[a-zA-Z]',                # 英文字符
+                'ko': r'[가-힣]',                  # 韩语字符
+                'fr': r'[àâäçéèêëïîôöùûüÿ]',      # 法语特殊字符
+                'de': r'[äöüß]',                  # 德语特殊字符
+                'ru': r'[а-яё]',                  # 俄语字符
+                'es': r'[ñáéíóúü]',               # 西班牙语特殊字符
+            }
+
+            # 尝试从配置获取目标语言，默认为日语
+            target_lang = self.settings.get('ai_services', {}).get('translation', {}).get('target_language', 'ja')
+
+            scored_candidates = []
+            for candidate in translation_candidates:
+                score = 0
+
+                # 检查是否包含目标语言字符
+                if target_lang in target_language_patterns:
+                    if re.search(target_language_patterns[target_lang], candidate):
+                        score += 10
+
+                # 检查句子完整性（以句号、问号、感叹号结尾）
+                if re.search(r'[。！？.!?]$', candidate):
+                    score += 5
+
+                # 检查长度适中性
+                if 10 <= len(candidate) <= 200:
+                    score += 3
+
+                # 检查是否包含中文（如果是翻译成外语，应该较少中文）
+                if re.search(r'[\u4e00-\u9fff]', candidate) and target_lang != 'zh':
+                    score -= 2
+
+                scored_candidates.append((score, candidate))
+
+            # 选择得分最高的候选
+            if scored_candidates:
+                scored_candidates.sort(key=lambda x: x[0], reverse=True)
+                return scored_candidates[0][1]
+
+        # 如果没有找到合适的候选，返回清理后的文本
+        return cleaned_text.strip()
+
+    def _extract_correction_result(self, text: str) -> str:
+        """智能提取修正结果，过滤掉思考内容和多余信息"""
+        import re
+
+        # 首先应用基本的思考内容过滤
+        text = self._filter_ai_thinking_content(text)
+
+        # 移除修正过程的分析性内容
+        analysis_patterns = [
+            r'好的，用户让我.*?需要：',           # 开头的理解性话语
+            r'首先，检查.*?接下来，',             # 分析过程描述
+            r'然后，确保.*?最后，',               # 步骤描述
+            r'我需要.*?我会：',                   # 自我描述
+            r'让我.*?我应该：',                   # 思考过程
+            r'分析：.*?结论：',                   # 分析框架
+            r'检查：.*?修正：',                   # 检查过程
+            r'问题：.*?解决：',                   # 问题解决描述
+            r'发现.*?改进：',                     # 改进过程描述
+            r'以下是修正后的文本：',              # 结果引导语
+            r'(修正完成|优化完成)',               # 完成标记
+        ]
+
+        cleaned_text = text
+        for pattern in analysis_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除括号中的说明性文字
+        explanation_patterns = [
+            r'\([^)]*解释[^)]*\)',              # 包含"解释"的括号
+            r'\([^)]*说明[^)]*\)',              # 包含"说明"的括号
+            r'\([^)]*分析[^)]*\)',              # 包含"分析"的括号
+            r'\([^)]*理由[^)]*\)',              # 包含"理由"的括号
+            r'\（[^）]*解释[^）]*\）',            # 中文括号的解释
+            r'\（[^）]*说明[^）]*\）',            # 中文括号的说明
+        ]
+
+        for pattern in explanation_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除常见的连接词和过渡语
+        transition_patterns = [
+            r'^(好的|嗯|那么|接下来|然后|另外|此外|还有|同时)\s*[，：。]',
+            r'\s+(好的|嗯|那么|接下来|然后|另外|此外|还有|同时)\s*[，：。]',
+            r'^(首先|其次|最后|最终|总之|总结)\s*[，：。]',
+            r'\s+(首先|其次|最后|最终|总之|总结)\s*[，：。]',
+        ]
+
+        for pattern in transition_patterns:
+            cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.MULTILINE | re.IGNORECASE)
+
+        # 智能提取修正结果 - 寻找最可能的修正内容
+        lines = cleaned_text.split('\n')
+        correction_candidates = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 跳过明显的非修正内容
+            skip_patterns = [
+                r'^(Human|Assistant|User|AI):',    # 对话标签
+                r'^\d+\.',                          # 数字列表
+                r'^[一二三四五六七八九十]+[、.]',      # 中文数字列表
+                r'^[•\-\*]\s',                      # 项目符号
+                r'^(要求|注意|说明|解释|分析):',      # 说明性文字开头
+                r'^(请|需要|应该|必须|检查|确保)',     # 指令性文字开头
+                r'(修正|优化|改进|纠正|调整)',         # 包含修正相关词汇
+                r'(检查|确保|保持|符合|验证)',         # 包含检查相关词汇
+                r'(原文|原始|初始)',                   # 包含原文相关词汇
+            ]
+
+            should_skip = False
+            for pattern in skip_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    should_skip = True
+                    break
+
+            if not should_skip and len(line) > 5:  # 过短的行很可能是噪音
+                correction_candidates.append(line)
+
+        # 如果有候选行，选择最合适的
+        if correction_candidates:
+            scored_candidates = []
+            for candidate in correction_candidates:
+                score = 0
+
+                # 检查句子完整性（以句号、问号、感叹号结尾）
+                if re.search(r'[。！？.!?]$', candidate):
+                    score += 5
+
+                # 检查长度适中性
+                if 8 <= len(candidate) <= 300:
+                    score += 3
+
+                # 检查是否包含中文（修正结果应该是中文）
+                if re.search(r'[\u4e00-\u9fff]', candidate):
+                    score += 10
+
+                # 检查标点符号使用（好的中文文本应该有适当标点）
+                if re.search(r'[，。！？；：]', candidate):
+                    score += 2
+
+                # 减分项：包含明显的分析性词汇
+                if re.search(r'(分析|检查|发现|问题|解决|改进|优化)', candidate):
+                    score -= 3
+
+                scored_candidates.append((score, candidate))
+
+            # 选择得分最高的候选
+            if scored_candidates:
+                scored_candidates.sort(key=lambda x: x[0], reverse=True)
+                return scored_candidates[0][1]
+
+        # 如果没有找到合适的候选，返回清理后的文本
+        return cleaned_text.strip()
 
     # 设备管理
     def on_audio_device_change(self, device_index: Optional[int]):
@@ -771,8 +1066,8 @@ class QuQuFletApp:
         # 兼容两种字段名：optimized_text（处理器返回）或 corrected_text（统一任务）
         corrected = getattr(task, 'corrected_text', None) or getattr(task, 'optimized_text', None)
         if corrected:
-            # 过滤AI回答中的思考内容
-            filtered_corrected = self._filter_ai_thinking_content(corrected)
+            # 智能提取修正结果，过滤掉思考内容和分析过程
+            filtered_corrected = self._extract_correction_result(corrected)
             print(f"[DEBUG] AI修正完成: {filtered_corrected}")
 
             def _ui_add_correction():
@@ -803,8 +1098,8 @@ class QuQuFletApp:
         logger.info(f"[DEBUG] 翻译结果: {getattr(task, 'translated_text', 'N/A')}")
 
         if hasattr(task, 'translated_text') and task.translated_text:
-            # 过滤AI回答中的思考内容
-            filtered_translation = self._filter_ai_thinking_content(task.translated_text)
+            # 智能提取翻译结果，过滤掉对话过程和思考内容
+            filtered_translation = self._extract_translation_result(task.translated_text)
             print(f"[DEBUG] 翻译完成: {filtered_translation}")
 
             def _ui_add_translation():
@@ -907,6 +1202,10 @@ class QuQuFletApp:
                     summary_text = result.get("text", "")
                     record_count = result.get("record_count", len(texts))
 
+                    # 过滤AI回答中的思考内容
+                    filtered_summary = self._filter_ai_thinking_content(summary_text)
+                    print(f"[DEBUG] 汇总结果过滤后: {filtered_summary[:100]}...")
+
                     # 保存到本地文件
                     from datetime import datetime
                     import os
@@ -919,10 +1218,10 @@ class QuQuFletApp:
                         f.write(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                         f.write(f"**记录数量**: {record_count} 条\n\n")
                         f.write("---\n\n")
-                        f.write(summary_text)
+                        f.write(filtered_summary)
 
                     # 添加到识别结果（特殊样式）
-                    self.result_card.add_result(summary_text, is_summary=True)
+                    self.result_card.add_result(filtered_summary, is_summary=True)
                     self.result_card.card.update()
 
                     self.update_status(f"✓ 汇总完成，已保存到: {filename}")
