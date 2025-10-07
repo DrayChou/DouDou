@@ -113,23 +113,30 @@ pip install -r requirements.txt
 python download_models.py
 
 # 5. 运行应用
-cd src
-python flet_app.py
+python main.py
 ```
 
-#### 使用启动脚本 (Windows)
+#### 使用启动脚本 (Windows - 推荐)
 
-项目提供了便捷的Windows启动脚本：
+项目提供了便捷的Windows启动脚本，自动处理环境配置：
 
-- **标准启动**: 双击 `run.bat` 文件
-  - 自动激活虚拟环境
-  - 启动应用
+- **智能启动器**: 双击 `启动DouDou.bat` 文件（推荐）
+  - ✅ 自动检测Python环境
+  - ✅ 自动创建/激活虚拟环境
+  - ✅ 自动安装依赖
+  - ✅ 友好的用户界面和错误提示
+
+- **快速启动**: 双击 `run.bat` 文件
+  - 直接启动应用
+  - 适合已配置好环境的用户
 
 - **管理员权限启动**: 双击 `run_as_admin.bat` 文件
   - 解决Windows音频设备兼容性问题（Error -9999）
   - 需要访问WASAPI loopback设备时使用
 
-> **提示**: 如果遇到音频设备无法识别或录音失败，请尝试使用管理员权限启动。
+> **提示**:
+> - 首次使用建议使用`启动DouDou.bat`，它会自动完成所有配置
+> - 如果遇到音频设备无法识别或录音失败，请尝试使用管理员权限启动
 
 ### 3. 配置AI服务
 

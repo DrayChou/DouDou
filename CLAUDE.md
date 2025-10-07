@@ -25,14 +25,16 @@ pip install -r requirements.txt
 
 ### Running the Application
 ```bash
-# Main application
-cd src
-python flet_app.py
+# Main application (recommended)
+python main.py
 
-# Windows users can also use (from project root)
-run.bat
-# or for admin privileges (audio driver issues)
-run_as_admin.bat
+# Direct source launch (development)
+cd src && python flet_app.py
+
+# Windows convenience scripts (from project root)
+run.bat              # Quick launch
+run_as_admin.bat     # Administrator privileges (for audio driver issues)
+启动DouDou.bat       # Smart launcher with auto-setup (recommended for first-time users)
 ```
 
 ### FunASR Model Management
